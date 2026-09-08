@@ -8,7 +8,8 @@ import * as THREE from 'three';
  */
 
 export interface EngineOptions {
-  /** Horizontal visibility in world units; drives fog and camera far plane. */
+  /** Horizontal visibility in world units; drives the camera far plane.
+   * (Fog itself is computed in the voxel shader.) */
   fogNear: number;
   fogFar: number;
   skyColor: number;
@@ -29,10 +30,8 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
   renderer.setSize(container.clientWidth, container.clientHeight);
   container.appendChild(renderer.domElement);
 
-  const sky = new THREE.Color(options.skyColor);
   const scene = new THREE.Scene();
-  scene.background = sky;
-  scene.fog = new THREE.Fog(sky, options.fogNear, options.fogFar);
+  scene.background = new THREE.Color(options.skyColor);
 
   const camera = new THREE.PerspectiveCamera(
     75,
@@ -41,14 +40,6 @@ export function createEngine(container: HTMLElement, options: EngineOptions): En
     options.fogFar + 96,
   );
   camera.rotation.order = 'YXZ';
-
-  // Basic lighting: sky/ground bounce plus one sun. (The Phase 4 voxel
-  // shader lights itself; these feed the interim Lambert material.)
-  const hemisphere = new THREE.HemisphereLight(0xcfe8ff, 0x59472e, 1.0);
-  scene.add(hemisphere);
-  const sun = new THREE.DirectionalLight(0xfff3d6, 1.6);
-  sun.position.set(30, 60, 20);
-  scene.add(sun);
 
   const onResize = () => {
     const width = container.clientWidth;

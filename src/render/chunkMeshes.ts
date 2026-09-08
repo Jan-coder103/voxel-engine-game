@@ -10,7 +10,8 @@ import {
 } from '../voxel/streaming';
 import type { Chunk } from '../voxel/chunk';
 import type { World } from '../voxel/world';
-import { buildVoxelGeometry, createVoxelMaterial } from './voxelGeometry';
+import { buildVoxelGeometry } from './voxelGeometry';
+import type { VoxelMaterialSet } from './voxelMaterial';
 
 /**
  * Owns the three.js meshes for the world's chunks (the mesh cache):
@@ -52,8 +53,6 @@ const DEFAULT_PARAMS: ChunkMeshManagerParams = {
 
 export class ChunkMeshManager {
   private readonly entries = new Map<string, ChunkEntry>();
-  /** Shared material — geometries are per-chunk, the material is not. */
-  private readonly material = createVoxelMaterial();
   readonly stats: ChunkMeshStats = {
     meshed: 0,
     queued: 0,
@@ -65,6 +64,7 @@ export class ChunkMeshManager {
   constructor(
     private readonly scene: THREE.Scene,
     private readonly world: World,
+    private readonly materials: VoxelMaterialSet,
     private readonly params: ChunkMeshManagerParams = DEFAULT_PARAMS,
   ) {}
 
@@ -161,10 +161,10 @@ export class ChunkMeshManager {
     this.disposeEntryMeshes(entry);
 
     if (mesh.opaque.quadCount > 0) {
-      entry.opaque = this.addMesh(buildVoxelGeometry(mesh.opaque), this.material, origin);
+      entry.opaque = this.addMesh(buildVoxelGeometry(mesh.opaque), this.materials.opaque, origin);
     }
     if (mesh.water.quadCount > 0) {
-      entry.water = this.addMesh(buildVoxelGeometry(mesh.water), this.material, origin);
+      entry.water = this.addMesh(buildVoxelGeometry(mesh.water), this.materials.water, origin);
     }
     entry.quads = mesh.opaque.quadCount + mesh.water.quadCount;
     chunk.dirty = false;

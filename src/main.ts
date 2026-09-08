@@ -5,6 +5,7 @@ import { DEFAULT_TERRAIN, type TerrainParams, findSpawn, generateChunk } from '.
 import { isSolidForCollision } from './voxel/materials';
 import { createEngine } from './render/bootstrap';
 import { ChunkMeshManager } from './render/chunkMeshes';
+import { createVoxelMaterials } from './render/voxelMaterial';
 import { InputManager } from './player/input';
 import { createPlayerState, eyePosition, stepPlayer, type PlayerState } from './player/controller';
 
@@ -51,8 +52,9 @@ function main(): void {
   const fogNear = CHUNK_SIZE * (RENDER_RADIUS - 2.5);
   const fogFar = CHUNK_SIZE * (RENDER_RADIUS + 0.5);
   const engine = createEngine(container, { fogNear, fogFar, skyColor: 0x87b5e0 });
+  const materials = createVoxelMaterials({ fogNear, fogFar, skyColor: 0x87b5e0 });
 
-  const chunkMeshes = new ChunkMeshManager(engine.scene, world, {
+  const chunkMeshes = new ChunkMeshManager(engine.scene, world, materials, {
     streaming: streamingParams(RENDER_RADIUS),
     meshBudgetPerFrame: MESH_BUDGET_PER_FRAME,
   });
