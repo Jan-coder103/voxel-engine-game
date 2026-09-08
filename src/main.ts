@@ -1,45 +1,24 @@
 import { CHUNK_SIZE, WORLD_HEIGHT_CHUNKS } from './voxel/coordinates';
-import { type Chunk } from './voxel/chunk';
 import { World } from './voxel/world';
 import { streamingParams } from './voxel/streaming';
-import { DIRT, GRASS, STONE, isSolidForCollision } from './voxel/materials';
+import { DEFAULT_TERRAIN, type TerrainParams, findSpawn, generateChunk } from './voxel/terrain';
+import { isSolidForCollision } from './voxel/materials';
 import { createEngine } from './render/bootstrap';
 import { ChunkMeshManager } from './render/chunkMeshes';
 import { InputManager } from './player/input';
 import { createPlayerState, eyePosition, stepPlayer, type PlayerState } from './player/controller';
 
 /**
- * Phase 2 demo: an infinite streamed chunk world. Chunk data lives in
+ * Phase 3 demo: an infinite streamed world of deterministic seeded
+ * terrain (hills, mountains, plains, sea level). Chunk data lives in
  * `World`; `ChunkMeshManager` builds and retires meshes around the player.
  */
 
-const RENDER_RADIUS = 4;
+const RENDER_RADIUS = 6;
 const MESH_BUDGET_PER_FRAME = 3;
 const RESPAWN_HEIGHT = -32;
 const FIXED_DT = 1 / 60;
 const MAX_SUBSTEPS = 5;
-
-const SPAWN = { x: 8.5, y: 12, z: 8.5 };
-
-// Phase 2 placeholder content: a flat grass world with one stone landmark.
-// Phase 3 replaces this with seeded terrain generation.
-function generateFlatChunk(chunk: Chunk): void {
-  const origin = chunk.origin;
-  for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-      for (let ly = 0; ly < 11; ly++) chunk.volume.set(lx, ly, lz, DIRT);
-      chunk.volume.set(lx, 11, lz, GRASS);
-    }
-  }
-  // Landmark tower at the world origin so the flat world has orientation.
-  if (origin.x === 0 && origin.y === 0 && origin.z === 0) {
-    for (let y = 12; y < 20; y++) {
-      for (let z = 4; z < 6; z++) {
-        for (let x = 4; x < 6; x++) chunk.volume.set(x, y, z, STONE);
-      }
-    }
-  }
-}
 
 function main(): void {
   const container = document.querySelector<HTMLElement>('#app');
@@ -49,7 +28,14 @@ function main(): void {
     throw new Error('Missing #app, #overlay, or #hud element');
   }
 
-  const world = new World(generateFlatChunk);
+  // Seeded URL override: ?seed=1234
+  const seedParam = Number.parseInt(new URLSearchParams(location.search).get('seed') ?? '', 10);
+  const terrain: TerrainParams = Number.isFinite(seedParam)
+    ? { ...DEFAULT_TERRAIN, seed: seedParam }
+    : DEFAULT_TERRAIN;
+
+  const world = new World((chunk) => generateChunk(chunk, terrain));
+  const SPAWN = findSpawn(terrain);
   // Generate ground around the spawn synchronously so physics is solid
   // on the first frame; everything else streams in.
   const spawnChunkX = Math.floor(SPAWN.x / CHUNK_SIZE);
@@ -62,8 +48,8 @@ function main(): void {
     }
   }
 
-  const fogNear = CHUNK_SIZE * (RENDER_RADIUS - 1.5);
-  const fogFar = CHUNK_SIZE * (RENDER_RADIUS + 0.75);
+  const fogNear = CHUNK_SIZE * (RENDER_RADIUS - 2.5);
+  const fogFar = CHUNK_SIZE * (RENDER_RADIUS + 0.5);
   const engine = createEngine(container, { fogNear, fogFar, skyColor: 0x87b5e0 });
 
   const chunkMeshes = new ChunkMeshManager(engine.scene, world, {

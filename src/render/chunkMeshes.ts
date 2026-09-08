@@ -161,19 +161,27 @@ export class ChunkMeshManager {
     this.disposeEntryMeshes(entry);
 
     if (mesh.opaque.quadCount > 0) {
-      entry.opaque = this.addMesh(buildVoxelGeometry(mesh.opaque), this.material);
+      entry.opaque = this.addMesh(buildVoxelGeometry(mesh.opaque), this.material, origin);
     }
     if (mesh.water.quadCount > 0) {
-      entry.water = this.addMesh(buildVoxelGeometry(mesh.water), this.material);
+      entry.water = this.addMesh(buildVoxelGeometry(mesh.water), this.material, origin);
     }
     entry.quads = mesh.opaque.quadCount + mesh.water.quadCount;
     chunk.dirty = false;
     if (!existing) this.entries.set(chunk.key, entry);
   }
 
-  private addMesh(geometry: THREE.BufferGeometry, material: THREE.Material): THREE.Mesh {
+  private addMesh(
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    origin: { x: number; y: number; z: number },
+  ): THREE.Mesh {
     const mesh = new THREE.Mesh(geometry, material);
+    // Geometry is in chunk-local coordinates; place it in the world once.
+    // Static meshes skip per-frame matrix updates.
+    mesh.position.set(origin.x, origin.y, origin.z);
     mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
     this.scene.add(mesh);
     return mesh;
   }
