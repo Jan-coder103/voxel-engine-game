@@ -32,11 +32,25 @@ greedy mesher lands (Phase 6). The Phase 1 demo world (16³, 828 quads)
 meshes in well under 5 ms, so interactive remeshing is not yet a
 concern.
 
-## Runtime (dev session, Phase 1 demo)
+## Baselines — terrain generation (`benchmarks/terrain.bench.ts`)
 
-- 60 fps (vsync-capped) in the in-app browser at 1280×720; the whole
-  frame budget is dominated by three.js startup, not world simulation.
-- World state: 4096 voxels = 8 KB dense payload.
+Same machine/date as the mesher numbers:
+
+| Scene                                | Ops/s   | ≈ time/op |
+| ------------------------------------ | ------- | --------- |
+| generateChunk (16×16 columns)        | ~2,333  | ~0.43 ms  |
+| heightAt × 256 (one chunk footprint) | ~14,542 | ~0.07 ms  |
+
+Generation is an order of magnitude cheaper than meshing — the
+streaming budget (3 chunk meshes per frame) is mesh-bound, which is
+where Phase 6 optimization effort should go.
+
+## Runtime (dev session, Phases 2–4 demo)
+
+- 60 fps (vsync-capped) in the in-app browser at 1280×720 with render
+  radius 6: 226 chunk meshes, ~80–83k quads, empty stream queue.
+- Streaming keeps up with walking; the mesh queue drains to 0 within a
+  couple of seconds of fast movement.
 
 ## Known gaps in measurement
 

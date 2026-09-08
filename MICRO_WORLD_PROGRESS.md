@@ -31,23 +31,79 @@
 
 ## Overall Phase
 
-**Current phase:** Phase 1 complete — next: Phase 2 (Chunks)
+**Current phase:** Phases 2–4 complete — next: Phase 5 (Editing)
 
-**Current milestone:** Milestone 1 (walk around a small voxel world) — met, verified in browser
+**Current milestone:** Milestones 1–2 met (walkable chunked world); Phase 3/4 feature phases complete
 
-**Overall completion:** ~10% (Phase 0 done, Phase 1 done, raycast stub deferred to Phase 5)
+**Overall completion:** ~18% (Phases 0–4 done; raycast stub deferred to Phase 5)
 
-**Last completed task:** Session 001 — repository unblocked (moved to ext4), npm install, git + CI, docs, baseline app, full Phase 1 (world, storage, mesher, player), 38 tests green, browser smoke test passed
+**Last completed task:** Session 002 — chunk system + streaming, deterministic seeded terrain, material registry + voxel shader, 82 tests green, three commits (20ce105, d7017e3, cd87560), browser-verified on two seeds
 
 **Current task:** None — clean handoff point
 
-**Blocked by:** Nothing (the exFAT blocker is resolved; project now lives on ext4 at `~/Coding Project/OpenCoder/AI_VOXELS/AI Voxel Game`)
+**Blocked by:** Nothing
 
-**Next recommended action:** Start Phase 2 (Chunks): chunk data structure around the existing `VoxelVolume`/coordinate primitives, chunk-boundary meshing with neighbor lookups, dirty-flag remeshing. See session log below for exact entry state.
+**Next recommended action:** Start Phase 5 (Editing): voxel DDA selection raycast, place/remove with dirty-chunk remeshing (the streaming layer already remeshes `World.setVoxel` marks), undo/redo commands, then save/load. The Session 002 log has the exact entry state.
 
 ---
 
 # Session Log
+
+## Session 002 — 2026-09-08
+
+**Status:** Complete — Phases 2, 3, 4 done; Milestone 2 met
+
+### Completed
+
+- [x] Phase 2: `Chunk` (16³ + dirty), `World` chunk map (world-space get/set, boundary-edit dirty propagation, neighbor invalidation on generation, radius pruning), mesher v2 (cross-chunk neighbor query, opaque/water pass split, voxelOrigins), pure streaming math, `ChunkMeshManager` (mesh cache, nearest-first queue with camera tie-break + per-frame budget, dirty remesh, geometry disposal), render radius 6, HUD streaming stats
+- [x] Phase 3: mulberry32 RNG, integer-hash value noise + fBm, hill/mountain height function, sea level, layered columns (bedrock/stone/dirt band/grass, sand at/under waterline, water fill), deterministic `findSpawn`; generation params tuned (≈7% water, ≈18% sand near demo area); terrain benchmarks
+- [x] Phase 4: full material registry (7 materials, metadata, opaque/solid classification, id/name lookup, versioned JSON serialization with validation), voxel ShaderMaterial (palette DataTexture indexed by materialId, per-voxel brightness variation, in-shader hemisphere+sun lighting and fog), transparent water pass
+- [x] 44 new tests (82 total): chunk/world, streaming math, terrain determinism + content rules, material registry/serialization, mesher boundary + water rules
+- [x] Browser verification on two seeds (?seed= default 1337 and 42): 60 fps, 226 chunk meshes, ~80k quads, queue drains, zero console errors; screenshots reviewed
+
+### Fixed during verification
+
+- Chunk meshes were never positioned in world space — every chunk rendered stacked at the origin. Masked by Phase 2's flat placeholder world (all chunks identical), exposed immediately by terrain. Meshes now get the chunk origin + `updateMatrix()`.
+- Streaming camera bonus originally outranked distance (a chunk 2 ahead beat a chunk 1 ahead); reduced to a ≤1 tie-breaker.
+- Terrain params tuned after measurement: original settings produced ~2% water and ~25% sand.
+
+### Deferred deliberately
+
+- Water physics (buoyancy/swimming) → Phase 9; water is currently a translucent, non-solid placeholder.
+- Automatic integration tests (browser) still manual GUI passes.
+
+### Tests
+
+- Unit tests: 82 passed (8 files)
+- Integration tests: none automated (manual browser GUI verification each phase)
+- Typecheck: clean (strict) · Lint: clean · Build: succeeds · Bench: added terrain baselines
+
+### Benchmarks
+
+- FPS: 60 (vsync-capped, 1280×720) at render radius 6 (226 chunk meshes, ~80k quads)
+- Chunk count: 226 meshed (113 columns × 2 layers); queue drains in ~2 s of fast movement
+- Other: generateChunk ≈ 0.43 ms; heightAt ≈ 0.07 ms per 256 columns (mesh-bound streaming)
+
+### Architecture changes
+
+- Mesher signature: `meshVolume(volume, query)` — the query redirects out-of-bounds reads through the world (chunk-boundary culling). Standalone volumes pass `getOrAir`.
+- Renderer bootstrap lost its scene lights/fog: the voxel shader computes lighting and fog itself; bootstrap now only owns renderer/camera/resize/loop.
+
+### Known issues
+
+- See `docs/known-issues.md`: water placeholder (no swim/collision), void fall when outrunning the streamer, stale meshes at the unload edge, flat shading without AO.
+
+### Next task
+
+- Task: Phase 5 — selection raycast + voxel place/remove with dirty remeshing
+
+### Recommended next steps
+
+1. Voxel DDA raycast (`src/voxel/raycast.ts`, pure + tested), selection wireframe in render, place/remove routed through `World.setVoxel` (remeshing already works).
+2. `EditCommand` + undo/redo stacks (Phase 5) before save/load.
+3. Revisit streaming budget if edit remeshes ever hitch (currently 3 chunks/frame, dirty-first).
+
+---
 
 ## Session 001 — 2026-09-08
 
@@ -230,69 +286,69 @@ pickup instructions in `HANDOFF.md`.
 
 ## Chunk
 
-- [ ] Define chunk size
-- [ ] Create chunk data structure
-- [ ] Implement chunk-local indexing
-- [ ] Implement neighbor lookup
-- [ ] Implement dirty flags
-- [ ] Implement chunk lifecycle
-- [ ] Add chunk tests
+- [x] Define chunk size
+- [x] Create chunk data structure
+- [x] Implement chunk-local indexing
+- [x] Implement neighbor lookup
+- [x] Implement dirty flags
+- [x] Implement chunk lifecycle
+- [x] Add chunk tests
 
 ## Chunk Meshing
 
-- [ ] Mesh one chunk
-- [ ] Hide internal faces
-- [ ] Handle neighboring chunks
-- [ ] Remesh dirty chunks
-- [ ] Dispose old geometry
-- [ ] Add mesh cache
+- [x] Mesh one chunk
+- [x] Hide internal faces
+- [x] Handle neighboring chunks
+- [x] Remesh dirty chunks
+- [x] Dispose old geometry
+- [x] Add mesh cache
 
 ## Streaming
 
-- [ ] Define render distance
-- [ ] Load chunks around player
-- [ ] Unload distant chunks
-- [ ] Implement chunk request queue
-- [ ] Prioritize chunks near player
-- [ ] Prioritize chunks in camera direction
-- [ ] Add loading statistics
+- [x] Define render distance
+- [x] Load chunks around player
+- [x] Unload distant chunks
+- [x] Implement chunk request queue
+- [x] Prioritize chunks near player
+- [x] Prioritize chunks in camera direction
+- [x] Add loading statistics
 
 ### Milestone
 
-- [ ] **Milestone 2 complete: Walkable chunked world**
+- [x] **Milestone 2 complete: Walkable chunked world** _(met — streamed radius-6 world, cross-chunk collision and culling verified in browser)_
 
 ---
 
 # Phase 3 — Terrain
 
-- [ ] Implement seeded RNG
-- [ ] Implement deterministic noise
-- [ ] Implement base terrain height
-- [ ] Add hills
-- [ ] Add mountains
-- [ ] Add plains
-- [ ] Add sea level
-- [ ] Add terrain material layers
-- [ ] Add terrain generation tests
-- [ ] Verify deterministic chunk generation
+- [x] Implement seeded RNG
+- [x] Implement deterministic noise
+- [x] Implement base terrain height
+- [x] Add hills
+- [x] Add mountains
+- [x] Add plains
+- [x] Add sea level
+- [x] Add terrain material layers
+- [x] Add terrain generation tests
+- [x] Verify deterministic chunk generation
 
 ---
 
 # Phase 4 — Materials
 
-- [ ] Create material registry
-- [ ] Add air
-- [ ] Add grass
-- [ ] Add dirt
-- [ ] Add stone
-- [ ] Add sand
-- [ ] Add wood
-- [ ] Add water placeholder
-- [ ] Add material metadata
-- [ ] Add material lookup
-- [ ] Add material serialization
-- [ ] Add basic material shader
-- [ ] Add material variation
+- [x] Create material registry
+- [x] Add air
+- [x] Add grass
+- [x] Add dirt
+- [x] Add stone
+- [x] Add sand
+- [x] Add wood
+- [x] Add water placeholder
+- [x] Add material metadata
+- [x] Add material lookup
+- [x] Add material serialization
+- [x] Add basic material shader
+- [x] Add material variation
 
 ---
 
