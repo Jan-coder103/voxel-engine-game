@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MICRO//WORLD — Phase 1</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0b0e14;
+      }
+      #app {
+        position: fixed;
+        inset: 0;
+      }
+      #app canvas {
+        display: block;
+      }
+      #overlay {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        background: rgba(8, 10, 16, 0.82);
+        color: #e8ecf4;
+        cursor: pointer;
+        user-select: none;
+        z-index: 10;
+      }
+      #overlay.hidden {
+        display: none;
+      }
+      #overlay h1 {
+        margin: 0;
+        font-size: 42px;
+        letter-spacing: 4px;
+      }
+      #overlay h1 span {
+        color: #6fc2ff;
+      }
+      #overlay .play {
+        font-size: 20px;
+        padding: 10px 26px;
+        border: 1px solid #3a475e;
+        border-radius: 8px;
+        background: #16202f;
+      }
+      #overlay .controls {
+        color: #9aa7bc;
+        font-size: 14px;
+        line-height: 1.9;
+        text-align: center;
+      }
+      #overlay .controls b {
+        color: #d7e2f2;
+        font-weight: 600;
+      }
+      #hud {
+        position: fixed;
+        top: 10px;
+        left: 12px;
+        color: #eef3fb;
+        font:
+          13px/1.4 ui-monospace,
+          'Cascadia Mono',
+          Consolas,
+          monospace;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+        z-index: 5;
+        pointer-events: none;
+        white-space: pre;
+      }
+      #crosshair {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        width: 6px;
+        height: 6px;
+        margin: -3px 0 0 -3px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.85);
+        box-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+        z-index: 5;
+        pointer-events: none;
+      }
+      #crosshair.hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud"></div>
+    <div id="crosshair" class="hidden"></div>
+    <div id="overlay">
+      <h1>MICRO<span>//</span>WORLD</h1>
+      <div class="play">Click to play</div>
+      <div class="controls">
+        <b>WASD</b> move &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>Space</b> jump
+        &nbsp;·&nbsp; <b>Esc</b> release cursor
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
