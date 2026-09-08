@@ -1,10 +1,20 @@
 import type { VoxelVolume } from './voxelVolume';
-import { isSolidMaterial } from './materials';
+import { AIR, WATER, isOpaque, type VoxelMaterialID } from './materials';
 
 /**
- * Naive culled face mesher: one quad per voxel face that touches air.
- * Pure data in, plain arrays out — no three.js here (ADR-002), so this
- * is unit-testable and benchmarkable in node.
+ * Naive culled face mesher: one quad per voxel face that touches air (or,
+ * for opaque voxels, touches water). Pure data in, plain arrays out — no
+ * three.js here (ADR-002), so this is unit-testable in node.
+ *
+ * Face-culling rules:
+ * - opaque voxel: emits a face iff the neighbor is NOT opaque (air or
+ *   water) — underwater terrain stays visible through the water.
+ * - water: emits a face iff the neighbor is air — water-water and
+ *   water-solid interfaces are hidden.
+ *
+ * Neighbor access: `query` receives volume-local coordinates and may be
+ * asked for coordinates outside `[0, size)`; chunk meshing passes one
+ * that reads the neighboring chunks. Missing neighbors read as air.
  */
 
 /** Quad corner offsets, ordered so triangles [0,1,2, 2,1,3] wind CCW
@@ -77,7 +87,7 @@ const FACES: readonly FaceDef[] = [
   },
 ];
 
-/** Mesh buffers for one volume. Vertex attributes are per-vertex. */
+/** Mesh buffers for one pass. Vertex attributes are per-vertex. */
 export interface MeshData {
   /** 3 floats per vertex, voxel-corner coordinates (voxel at origin spans [0,1]). */
   positions: Float32Array;
@@ -85,48 +95,84 @@ export interface MeshData {
   normals: Float32Array;
   /** Material ID per vertex (per-face in practice). */
   materialIds: Uint16Array;
+  /** 3 floats per vertex, the integer voxel the vertex belongs to (shader variation). */
+  voxelOrigins: Float32Array;
   /** Triangle indices, 6 per quad. */
   indices: Uint32Array;
   readonly quadCount: number;
 }
 
-/** Extract an outward-facing culled mesh from a volume. */
-export function meshVolume(volume: VoxelVolume): MeshData {
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const materialIds: number[] = [];
-  const indices: number[] = [];
-  const size = volume.size;
+/** Opaque and water passes for one volume (water renders transparent). */
+export interface ChunkMesh {
+  opaque: MeshData;
+  water: MeshData;
+}
 
+/** Local-coordinate voxel query; coordinates may leave `[0, size)`. */
+export type VoxelQuery = (x: number, y: number, z: number) => VoxelMaterialID;
+
+interface MeshBuffers {
+  positions: number[];
+  normals: number[];
+  materialIds: number[];
+  voxelOrigins: number[];
+  indices: number[];
+}
+
+function emptyBuffers(): MeshBuffers {
+  return { positions: [], normals: [], materialIds: [], voxelOrigins: [], indices: [] };
+}
+
+function toMeshData(buffers: MeshBuffers): MeshData {
+  return {
+    positions: new Float32Array(buffers.positions),
+    normals: new Float32Array(buffers.normals),
+    materialIds: new Uint16Array(buffers.materialIds),
+    voxelOrigins: new Float32Array(buffers.voxelOrigins),
+    indices: new Uint32Array(buffers.indices),
+    quadCount: buffers.indices.length / 6,
+  };
+}
+
+/** Extract an outward-facing culled mesh from a volume. */
+export function meshVolume(volume: VoxelVolume, query: VoxelQuery): ChunkMesh {
+  // In-bounds reads always come from the volume itself, so a query that
+  // (incorrectly) handles in-bounds coordinates cannot corrupt the mesh.
+  const voxelAt: VoxelQuery = (x, y, z) =>
+    volume.inBounds(x, y, z) ? volume.get(x, y, z) : query(x, y, z);
+
+  const opaque = emptyBuffers();
+  const water = emptyBuffers();
+
+  const size = volume.size;
   for (let y = 0; y < size; y++) {
     for (let z = 0; z < size; z++) {
       for (let x = 0; x < size; x++) {
-        const material = volume.getOrAir(x, y, z);
-        if (!isSolidMaterial(material)) continue;
+        const material = voxelAt(x, y, z);
+        if (material === AIR) continue;
+
+        const buffers = material === WATER ? water : opaque;
+        const emitsAgainst = (neighbor: VoxelMaterialID) =>
+          material === WATER ? neighbor === AIR : !isOpaque(neighbor);
 
         for (const face of FACES) {
           const [dx, dy, dz] = face.dir;
-          const neighbor = volume.getOrAir(x + dx, y + dy, z + dz);
-          if (isSolidMaterial(neighbor)) continue;
+          const neighbor = voxelAt(x + dx, y + dy, z + dz);
+          if (!emitsAgainst(neighbor)) continue;
 
-          const vertexBase = positions.length / 3;
+          const vertexBase = buffers.positions.length / 3;
           for (const [cx, cy, cz] of face.corners) {
-            positions.push(x + cx, y + cy, z + cz);
-            normals.push(dx, dy, dz);
-            materialIds.push(material);
+            buffers.positions.push(x + cx, y + cy, z + cz);
+            buffers.normals.push(dx, dy, dz);
+            buffers.materialIds.push(material);
+            buffers.voxelOrigins.push(x, y, z);
           }
-          indices.push(vertexBase, vertexBase + 1, vertexBase + 2);
-          indices.push(vertexBase + 2, vertexBase + 1, vertexBase + 3);
+          buffers.indices.push(vertexBase, vertexBase + 1, vertexBase + 2);
+          buffers.indices.push(vertexBase + 2, vertexBase + 1, vertexBase + 3);
         }
       }
     }
   }
 
-  return {
-    positions: new Float32Array(positions),
-    normals: new Float32Array(normals),
-    materialIds: new Uint16Array(materialIds),
-    indices: new Uint32Array(indices),
-    quadCount: indices.length / 6,
-  };
+  return { opaque: toMeshData(opaque), water: toMeshData(water) };
 }

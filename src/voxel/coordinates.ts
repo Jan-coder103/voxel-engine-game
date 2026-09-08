@@ -11,6 +11,19 @@
 /** Voxels per chunk edge. Phase 1 world is a single chunk-sized volume. */
 export const CHUNK_SIZE = 16;
 
+/** Total world height in voxels (Phase 2+: two vertical chunk layers). */
+export const WORLD_HEIGHT = 32;
+export const WORLD_HEIGHT_CHUNKS = WORLD_HEIGHT / CHUNK_SIZE;
+
+/** Stable map key for a chunk coordinate. */
+export function chunkKey(x: number, y: number, z: number): string {
+  return `${x},${y},${z}`;
+}
+
+export function chunkKeyCoord(coord: ChunkCoordinate): string {
+  return chunkKey(coord.x, coord.y, coord.z);
+}
+
 /** Position in world space, in voxels (1 unit = 1 voxel edge for now). */
 export interface WorldCoordinate {
   x: number;

@@ -7,6 +7,13 @@ import * as THREE from 'three';
  * where they meet.
  */
 
+export interface EngineOptions {
+  /** Horizontal visibility in world units; drives fog and camera far plane. */
+  fogNear: number;
+  fogFar: number;
+  skyColor: number;
+}
+
 export interface Engine {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
@@ -16,25 +23,27 @@ export interface Engine {
   dispose(): void;
 }
 
-export function createEngine(container: HTMLElement): Engine {
+export function createEngine(container: HTMLElement, options: EngineOptions): Engine {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(container.clientWidth, container.clientHeight);
   container.appendChild(renderer.domElement);
 
+  const sky = new THREE.Color(options.skyColor);
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87b5e0);
-  scene.fog = new THREE.Fog(0x87b5e0, 40, 120);
+  scene.background = sky;
+  scene.fog = new THREE.Fog(sky, options.fogNear, options.fogFar);
 
   const camera = new THREE.PerspectiveCamera(
     75,
     container.clientWidth / container.clientHeight,
     0.1,
-    500,
+    options.fogFar + 96,
   );
   camera.rotation.order = 'YXZ';
 
-  // Basic lighting: sky/ground bounce plus one sun.
+  // Basic lighting: sky/ground bounce plus one sun. (The Phase 4 voxel
+  // shader lights itself; these feed the interim Lambert material.)
   const hemisphere = new THREE.HemisphereLight(0xcfe8ff, 0x59472e, 1.0);
   scene.add(hemisphere);
   const sun = new THREE.DirectionalLight(0xfff3d6, 1.6);

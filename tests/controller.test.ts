@@ -12,7 +12,7 @@ import {
   type FrameInput,
   type PlayerState,
 } from '../src/player/controller';
-import { STONE } from '../src/voxel/materials';
+import { STONE, isSolidForCollision } from '../src/voxel/materials';
 import { VoxelVolume } from '../src/voxel/voxelVolume';
 
 const DT = 1 / 60;
@@ -34,7 +34,7 @@ function groundVolume(groundY = 3): VoxelVolume {
 }
 
 function makeSolid(volume: VoxelVolume) {
-  return (x: number, y: number, z: number) => volume.getOrAir(x, y, z) !== 0;
+  return (x: number, y: number, z: number) => isSolidForCollision(volume.getOrAir(x, y, z));
 }
 
 function spawnAbove(groundTop: number, x = 16.5, z = 16.5): PlayerState {

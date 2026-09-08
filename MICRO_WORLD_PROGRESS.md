@@ -141,12 +141,12 @@ pickup instructions in `HANDOFF.md`.
 - [x] Configure Vite/dev server
 - [x] Add Three.js
 - [x] Establish source directory structure
-- [x] Establish package/app structure if using a monorepo *(N/A — single npm package, per agreed approach)*
+- [x] Establish package/app structure if using a monorepo _(N/A — single npm package, per agreed approach)_
 - [x] Configure strict TypeScript
 - [x] Configure ESLint
 - [x] Configure formatter
 - [x] Configure unit testing
-- [ ] Configure integration testing *(browser smoke test is manual; automated browser tests deferred)*
+- [ ] Configure integration testing _(browser smoke test is manual; automated browser tests deferred)_
 - [x] Add build script
 - [x] Add typecheck script
 - [x] Add lint script
@@ -218,11 +218,11 @@ pickup instructions in `HANDOFF.md`.
 - [x] Implement gravity
 - [x] Implement collision with initial world
 - [x] Implement jump
-- [ ] Add basic interaction raycast *(deferred to Phase 5 — its first consumer is editing; see `docs/known-issues.md`)*
+- [ ] Add basic interaction raycast _(deferred to Phase 5 — its first consumer is editing; see `docs/known-issues.md`)_
 
 ### Milestone
 
-- [x] **Milestone 1 complete: Walk around a small voxel world** *(met — verified in browser with real input: spawn, walk, jump, mouse look, collision, respawn)*
+- [x] **Milestone 1 complete: Walk around a small voxel world** _(met — verified in browser with real input: spawn, walk, jump, mouse look, collision, respawn)_
 
 ---
 

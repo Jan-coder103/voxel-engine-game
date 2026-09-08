@@ -21,19 +21,26 @@ function solidVolume(size: number): VoxelVolume {
 }
 
 describe('meshVolume', () => {
+  const query = (volume: VoxelVolume) => (x: number, y: number, z: number) =>
+    volume.getOrAir(x, y, z);
+
   bench('solid 16³', () => {
-    meshVolume(solidVolume(16));
+    const v = solidVolume(16);
+    meshVolume(v, query(v));
   });
 
   bench('checker 16³ (worst case)', () => {
-    meshVolume(noisyVolume(16));
+    const v = noisyVolume(16);
+    meshVolume(v, query(v));
   });
 
   bench('solid 32³', () => {
-    meshVolume(solidVolume(32));
+    const v = solidVolume(32);
+    meshVolume(v, query(v));
   });
 
   bench('checker 32³ (worst case)', () => {
-    meshVolume(noisyVolume(32));
+    const v = noisyVolume(32);
+    meshVolume(v, query(v));
   });
 });
