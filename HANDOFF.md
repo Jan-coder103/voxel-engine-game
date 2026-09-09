@@ -1,7 +1,7 @@
 # HANDOFF — Session 005 mid-stream (2026-09-10)
 
 **Status: Phase 9 (Water) is ~90% implemented and GREEN — 239 unit tests
-pass (was 205), but NOTHING IS COMMITTED YET and three verification steps
+pass (was 205), but NOTHING IS COMMITTED YET (YES IT WAS, committed by user and pushed - to work from other laptop) and three verification steps
 remain (benchmark run, typecheck/lint/build re-run, browser pass + docs).**
 All work is in the working tree. Canonical long-term state lives in
 `MICRO_WORLD_PROGRESS.md`; this file is the pickup map.
