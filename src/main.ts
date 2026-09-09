@@ -1,4 +1,5 @@
-import { CHUNK_SIZE, WORLD_HEIGHT_CHUNKS, type WorldCoordinate } from './voxel/coordinates';
+import type { WorldCoordinate } from './voxel/coordinates';
+import { CHUNK_SIZE, WORLD_HEIGHT_CHUNKS } from './voxel/coordinates';
 import { World } from './voxel/world';
 import { streamingParams } from './voxel/streaming';
 import { DEFAULT_TERRAIN, type TerrainParams, findSpawn, generateChunk } from './voxel/terrain';
@@ -12,14 +13,18 @@ import {
 } from './voxel/materials';
 import { raycastVoxels, type RaycastHit } from './voxel/raycast';
 import { applyEdits, EditHistory, intersectsPlayerCell, type VoxelEdit } from './voxel/edits';
+import { debrisFromCells, explode } from './voxel/damage';
+import { checkSupport, supportRegionFor } from './voxel/support';
 import {
   AutosavePolicy,
   deserializeWorld,
   serializeWorld,
   type SerializedWorld,
 } from './voxel/persistence';
+import { EventBus } from './sim/events';
 import {
   brushEdits,
+  brushBounds,
   clampBrushSize,
   type BrushShape,
   type BrushTool,
@@ -43,6 +48,9 @@ import { ChunkMeshManager } from './render/chunkMeshes';
 import { createVoxelMaterials } from './render/voxelMaterial';
 import { SelectionViz } from './render/selectionViz';
 import { CreatorViz } from './render/creatorViz';
+import { DebrisSystem } from './render/debris';
+import { DustSystem } from './render/dust';
+import { SoundFx } from './audio/sfx';
 import { LocalStorageSaveStore } from './persistence/localStorageStore';
 import { InputManager } from './player/input';
 import {
@@ -163,12 +171,13 @@ const creatorViz = new CreatorViz(engine.scene);
 
   // --- Creator mode (Phase 7) -------------------------------------------
   const BRUSH_SHAPES: BrushShape[] = ['sphere', 'box', 'cylinder', 'noise'];
-  const BRUSH_TOOLS: BrushTool[] = ['place', 'delete', 'paint', 'replace'];
+  const BRUSH_TOOLS: BrushTool[] = ['place', 'delete', 'paint', 'replace', 'explode'];
   const TOOL_COLORS: Record<BrushTool, number> = {
     place: 0xffffff, // replaced with the material color at draw time
     delete: 0xff6b57,
     paint: 0xffd75e,
     replace: 0xb07fe0,
+    explode: 0xff9944,
   };
 
   const prefabs = new PrefabLibrary(store);
@@ -216,6 +225,7 @@ const creatorViz = new CreatorViz(engine.scene);
       }
     }
     edit(edits, 'cut');
+    runSupportCheck(min, max);
   };
 
   const pasteClipboard = (hit: RaycastHit): void => {
@@ -275,6 +285,10 @@ const creatorViz = new CreatorViz(engine.scene);
       brush.tool === 'place'
         ? { x: hit.voxel.x + hit.normal.x, y: hit.voxel.y + hit.normal.y, z: hit.voxel.z + hit.normal.z }
         : hit.voxel;
+    if (brush.tool === 'explode') {
+      doExplosion(hit);
+      return;
+    }
     const edits = brushEdits(
       brush,
       center,
@@ -284,6 +298,90 @@ const creatorViz = new CreatorViz(engine.scene);
         : undefined,
     );
     edit(edits, `brush ${brush.tool}`);
+    if (brush.tool === 'delete') {
+      const bounds = brushBounds(brush, center);
+      runSupportCheck(bounds.min, bounds.max);
+    }
+  };
+
+  // --- Destruction (Phase 8) --------------------------------------------
+  const bus = new EventBus();
+  const sfx = new SoundFx();
+  const debris = new DebrisSystem(engine.scene);
+  const dust = new DustSystem(engine.scene);
+  const colorFor = (material: VoxelMaterialID) => getMaterial(material).color;
+  let explosionSeed = 1;
+
+  bus.on('explosion', () => sfx.boom());
+  bus.on('structureCollapsed', () => {
+    sfx.crack();
+  });
+
+  /**
+   * After a destructive edit: find solid cells that lost their support and
+   * collapse them as one undoable command. Debris specs are captured
+   * before the edit (they need the cells' materials), then applied.
+   */
+  const runSupportCheck = (min: WorldCoordinate, max: WorldCoordinate): void => {
+    const result = checkSupport(voxelQuery, supportRegionFor({ min, max }));
+    if (!result.checked || result.unsupported.length === 0) return;
+    const cells = result.unsupported;
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    for (const cell of cells) {
+      cx += cell.x;
+      cy += cell.y;
+      cz += cell.z;
+    }
+    cx /= cells.length;
+    cy /= cells.length;
+    cz /= cells.length;
+    const specs = debrisFromCells(cells, voxelQuery, {
+      seed: 777 + cells.length,
+      maxDebris: 80,
+      x: cx,
+      z: cz,
+    });
+    edit(
+      cells.map((cell) => ({ x: cell.x, y: cell.y, z: cell.z, material: AIR })),
+      'collapse',
+    );
+    debris.spawn(specs, colorFor);
+    dust.puff(cx + 0.5, cy + 0.5, cz + 0.5, {
+      count: Math.min(48, 8 + Math.floor(cells.length / 4)),
+      spread: Math.min(6, 2 + Math.cbrt(cells.length) / 2),
+      rise: 1.8,
+    });
+    bus.emit({ type: 'structureCollapsed', x: cx, y: cy, z: cz, cells: cells.length });
+    sfx.thud();
+  };
+
+  /** Creator-mode explosion tool: spherical blast + debris + dust + sound. */
+  const doExplosion = (hit: RaycastHit): void => {
+    const center = { x: hit.voxel.x + 0.5, y: hit.voxel.y + 0.5, z: hit.voxel.z + 0.5 };
+    const radius = creator.brush.size + 2;
+    const result = explode(center, radius, voxelQuery, { seed: explosionSeed++, maxDebris: 64 });
+    edit(result.edits, 'explode');
+    debris.spawn(result.debris, colorFor);
+    dust.puff(center.x, center.y, center.z, {
+      count: 36,
+      spread: radius * 0.8,
+      rise: 2.5,
+      size: 0.45,
+    });
+    bus.emit({
+      type: 'explosion',
+      x: center.x,
+      y: center.y,
+      z: center.z,
+      radius,
+      destroyed: result.destroyed,
+    });
+    runSupportCheck(
+      { x: hit.voxel.x - radius, y: Math.max(1, hit.voxel.y - radius), z: hit.voxel.z - radius },
+      { x: hit.voxel.x + radius, y: hit.voxel.y + radius, z: hit.voxel.z + radius },
+    );
   };
 
   const saveNow = (): void => {
@@ -339,6 +437,10 @@ const creatorViz = new CreatorViz(engine.scene);
     crosshair?.classList.toggle('hidden', !input.isLocked);
   };
   document.addEventListener('pointerlockchange', syncOverlay);
+  // Audio contexts need a user gesture; pointer lock is our first one.
+  document.addEventListener('pointerlockchange', () => {
+    if (input.isLocked) sfx.resume();
+  });
 
   const solidAt = (x: number, y: number, z: number) => isSolidForCollision(world.getVoxel(x, y, z));
 
@@ -362,6 +464,7 @@ const creatorViz = new CreatorViz(engine.scene);
       // Remove: refuse the bedrock floor so the world bottom stays closed.
       if (hit.voxel.y <= BEDROCK_Y) return;
       edit([{ ...hit.voxel, material: AIR }], 'remove');
+      runSupportCheck(hit.voxel, hit.voxel);
     } else if (button === 2) {
       // Place into the face-adjacent cell, never into the player.
       const cell = hit.normal;
@@ -449,6 +552,10 @@ const creatorViz = new CreatorViz(engine.scene);
     // --- Creator-mode keys (Phase 7) ---
     if (code === 'KeyI') {
       creator.inspector = !creator.inspector;
+      return;
+    }
+    if (code === 'KeyN') {
+      sfx.setEnabled(!sfx.enabled);
       return;
     }
     if (code === 'KeyC') {
@@ -539,6 +646,10 @@ const creatorViz = new CreatorViz(engine.scene);
     const camDirXZ = { x: -Math.sin(player.yaw), z: -Math.cos(player.yaw) };
     chunkMeshes.update(player.position, camDirXZ);
 
+    // Destruction particle/physics steps (render-side pools).
+    debris.update(frameDt, (x, y, z) => isSolidForCollision(world.getVoxel(x, y, z)));
+    dust.update(frameDt);
+
     // Targeting + edit previews (render only; input handled above).
     const hit = input.isLocked ? targetHit() : undefined;
     if (hit) {
@@ -607,7 +718,8 @@ const creatorViz = new CreatorViz(engine.scene);
           `pos ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}` +
           (player.onGround ? '' : ' · air'),
         `mat ${selected.name} · target ${target} · undo ${history.depth} · ` +
-          `seed ${terrain.seed} · ${savedText}`,
+          `seed ${terrain.seed} · ${savedText} · snd ${sfx.enabled ? 'on' : 'off'} · ` +
+          `debris ${debris.activeCount}/${debris.capacity}`,
       ];
       if (creator.enabled) {
         const b = creator.brush;

@@ -33,11 +33,31 @@ export type ChunkGenerator = (chunk: Chunk) => void;
 export class World {
   readonly chunks = new Map<string, Chunk>();
   private readonly editJournal = new Map<string, Map<number, VoxelMaterialID>>();
+  // One-slot chunk memo for hot read paths (region scans, raycasts).
+  // Invalidated whenever the chunk map's membership changes.
+  private cachedChunk: Chunk | undefined;
+  private cachedAtX = NaN;
+  private cachedAtY = NaN;
+  private cachedAtZ = NaN;
 
   constructor(private readonly generate: ChunkGenerator = () => {}) {}
 
   getChunk(x: number, y: number, z: number): Chunk | undefined {
     return this.chunks.get(chunkKey(x, y, z));
+  }
+
+  private cachedGetChunk(x: number, y: number, z: number): Chunk | undefined {
+    if (x !== this.cachedAtX || y !== this.cachedAtY || z !== this.cachedAtZ) {
+      this.cachedChunk = this.chunks.get(chunkKey(x, y, z));
+      this.cachedAtX = x;
+      this.cachedAtY = y;
+      this.cachedAtZ = z;
+    }
+    return this.cachedChunk;
+  }
+
+  private invalidateChunkCache(): void {
+    this.cachedAtX = NaN;
   }
 
   /**
@@ -57,6 +77,7 @@ export class World {
       for (const [index, material] of journaled) chunk.volume.setByIndex(index, material);
     }
     this.chunks.set(chunk.key, chunk);
+    this.invalidateChunkCache();
     this.markNeighborsDirty(x, y, z);
     return chunk;
   }
@@ -96,6 +117,7 @@ export class World {
 
   /** Drop a chunk's data. Render meshes must be disposed by the caller first. */
   unloadChunk(x: number, y: number, z: number): boolean {
+    this.invalidateChunkCache();
     return this.chunks.delete(chunkKey(x, y, z));
   }
 
@@ -115,12 +137,13 @@ export class World {
         removed++;
       }
     }
+    if (removed > 0) this.invalidateChunkCache();
     return removed;
   }
 
   /** Read a voxel anywhere in world space; unloaded chunks are air. */
   getVoxel(x: number, y: number, z: number): VoxelMaterialID {
-    const chunk = this.getChunk(worldToChunk(x), worldToChunk(y), worldToChunk(z));
+    const chunk = this.cachedGetChunk(worldToChunk(x), worldToChunk(y), worldToChunk(z));
     if (!chunk) return AIR;
     return chunk.volume.getOrAir(worldToLocal(x), worldToLocal(y), worldToLocal(z));
   }

@@ -19,7 +19,12 @@ import { hash3 } from '../voxel/terrain';
  */
 
 export type BrushShape = 'sphere' | 'box' | 'cylinder' | 'noise';
-export type BrushTool = 'place' | 'delete' | 'paint' | 'replace';
+/**
+ * `explode` is the Phase 8 destruction entry point: it is routed to
+ * `explode()` in `voxel/damage.ts` (its own edit list + debris), not to
+ * `brushEdits`.
+ */
+export type BrushTool = 'place' | 'delete' | 'paint' | 'replace' | 'explode';
 
 export const BRUSH_MIN_SIZE = 1;
 export const BRUSH_MAX_SIZE = 8;
