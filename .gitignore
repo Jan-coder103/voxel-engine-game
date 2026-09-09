@@ -3,3 +3,6 @@ dist/
 coverage/
 *.local
 .DS_Store
+
+# Local GUI verification scripts (not part of the game or CI)
+.verify/

@@ -748,6 +748,18 @@ const creatorViz = new CreatorViz(engine.scene);
     }
   });
 
+  // Dev-only debug hook: lets GUI verification scripts (headless browser
+  // tests) read game state directly. Stripped from production builds.
+  if (import.meta.env.DEV) {
+    (window as unknown as Record<string, unknown>).__mw = {
+      player,
+      world,
+      creator,
+      history,
+      isLocked: () => input.isLocked,
+    };
+  }
+
   function saveAge(from: number): string {
     const seconds = Math.round((performance.now() - from) / 1000);
     return seconds < 5 ? 'just now' : `${seconds}s ago`;
