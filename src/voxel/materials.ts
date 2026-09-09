@@ -64,6 +64,26 @@ export function isSolidForCollision(id: VoxelMaterialID): boolean {
   return getMaterial(id).solid;
 }
 
+/**
+ * Relative resistance to the destruction damage field (Phase 8): 0 = a
+ * blast erases it to the very edge of its radius, 1 = only the blast core
+ * reaches it. A derived balance table, not a serialized registry field —
+ * the save format keeps validating the four registry fields above.
+ * Unknown ids fall back to a mid-value (defensive against corrupt data).
+ */
+const MATERIAL_HARDNESS: Readonly<Record<number, number>> = {
+  [GRASS]: 0.35,
+  [DIRT]: 0.4,
+  [STONE]: 0.85,
+  [SAND]: 0.25,
+  [WOOD]: 0.55,
+  [WATER]: 0.05,
+};
+
+export function hardnessOf(id: VoxelMaterialID): number {
+  return MATERIAL_HARDNESS[id] ?? 0.5;
+}
+
 /** Bump when the serialized table layout changes (not when entries are added). */
 export const MATERIAL_FORMAT_VERSION = 1;
 

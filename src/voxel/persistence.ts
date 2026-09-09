@@ -146,6 +146,8 @@ export interface SaveStore {
   get(key: string): string | undefined;
   set(key: string, value: string): void;
   delete(key: string): void;
+  /** All keys currently in the store (without any backend prefix). */
+  keys(): string[];
 }
 
 /** In-memory store for tests and headless use. */
@@ -162,6 +164,10 @@ export class MemorySaveStore implements SaveStore {
 
   delete(key: string): void {
     this.map.delete(key);
+  }
+
+  keys(): string[] {
+    return [...this.map.keys()];
   }
 }
 

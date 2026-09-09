@@ -48,6 +48,25 @@ function hash2(ix: number, iz: number, seed: number): number {
   return (h >>> 0) / 4294967296;
 }
 
+/**
+ * 3D integer-coordinate hash → [0, 1). Same mixing style as the terrain
+ * hash, but a separate function: the 2D hash's output values are baked
+ * into every existing seed's terrain, so it must never change. Used for
+ * deterministic scatter (noise brush, debris sampling) — no sequential
+ * RNG state anywhere.
+ */
+export function hash3(ix: number, iy: number, iz: number, seed: number): number {
+  let h =
+    (Math.imul(ix, 374761393) +
+      Math.imul(iy, 2246822519) +
+      Math.imul(iz, 668265263) +
+      Math.imul(seed, 3266489917)) |
+    0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
 /** Smooth quintic fade for noise interpolation. */
 function fade(t: number): number {
   return t * t * t * (t * (t * 6 - 15) + 10);

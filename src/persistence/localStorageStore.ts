@@ -33,4 +33,18 @@ export class LocalStorageSaveStore implements SaveStore {
       console.warn('Save store delete failed', error);
     }
   }
+
+  keys(): string[] {
+    try {
+      const out: string[] = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const full = window.localStorage.key(i);
+        if (full !== null && full.startsWith(this.prefix)) out.push(full.slice(this.prefix.length));
+      }
+      return out;
+    } catch (error) {
+      console.warn('Save store key listing failed', error);
+      return [];
+    }
+  }
 }
