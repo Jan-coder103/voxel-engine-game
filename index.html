@@ -96,18 +96,63 @@
       #crosshair.hidden {
         display: none;
       }
+      #hotbar {
+        position: fixed;
+        left: 50%;
+        bottom: 14px;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 6px;
+        z-index: 5;
+        pointer-events: none;
+      }
+      #hotbar .slot {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px 4px 6px;
+        border: 1px solid #2a3547;
+        border-radius: 6px;
+        background: rgba(12, 17, 26, 0.78);
+        color: #9aa7bc;
+        font:
+          12px/1 ui-monospace,
+          'Cascadia Mono',
+          Consolas,
+          monospace;
+      }
+      #hotbar .slot.active {
+        border-color: #6fc2ff;
+        color: #e8ecf4;
+        box-shadow: 0 0 6px rgba(111, 194, 255, 0.35);
+      }
+      #hotbar .slot .swatch {
+        width: 14px;
+        height: 14px;
+        border-radius: 3px;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+      }
+      #hotbar .slot .key {
+        margin-left: 2px;
+        color: #5d6b80;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
     <div id="hud"></div>
     <div id="crosshair" class="hidden"></div>
+    <div id="hotbar"></div>
     <div id="overlay">
       <h1>MICRO<span>//</span>WORLD</h1>
       <div class="play">Click to play</div>
       <div class="controls">
         <b>WASD</b> move &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>Space</b> jump
-        &nbsp;·&nbsp; <b>Esc</b> release cursor
+        &nbsp;·&nbsp; <b>Esc</b> release cursor<br />
+        <b>LMB</b> remove &nbsp;·&nbsp; <b>RMB</b> place &nbsp;·&nbsp; <b>MMB</b> pick
+        material &nbsp;·&nbsp; <b>Wheel</b>/<b>1–7</b> material<br />
+        <b>Ctrl+Z</b> undo &nbsp;·&nbsp; <b>Ctrl+Y</b> redo &nbsp;·&nbsp; <b>K</b> save
+        &nbsp;·&nbsp; <b>L</b> load &nbsp;·&nbsp; <b>?seed=N</b> new world
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

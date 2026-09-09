@@ -81,4 +81,18 @@ describe('VoxelVolume', () => {
     expect(() => new VoxelVolume(-2)).toThrow(RangeError);
     expect(() => new VoxelVolume(2.5)).toThrow(RangeError);
   });
+
+  it('reads and writes by flat index with bounds checking', () => {
+    const volume = new VoxelVolume(4);
+    volume.set(1, 2, 3, GRASS);
+    const index = volume.index(1, 2, 3);
+    expect(volume.getByIndex(index)).toBe(GRASS);
+
+    expect(volume.setByIndex(index, DIRT)).toBe(true);
+    expect(volume.get(1, 2, 3)).toBe(DIRT);
+
+    expect(volume.setByIndex(-1, STONE)).toBe(false);
+    expect(volume.setByIndex(volume.voxelCount, STONE)).toBe(false);
+    expect(() => volume.getByIndex(volume.voxelCount)).toThrow(RangeError);
+  });
 });

@@ -57,6 +57,19 @@ export class VoxelVolume {
     return true;
   }
 
+  /** Read by flat index (`index(x, y, z)` layout). Throws on bad index. */
+  getByIndex(index: number): VoxelMaterialID {
+    this.assertIndexInBounds(index);
+    return this.data[index];
+  }
+
+  /** Write by flat index. Returns false (and writes nothing) on bad index. */
+  setByIndex(index: number, material: VoxelMaterialID): boolean {
+    if (index < 0 || index >= this.data.length) return false;
+    this.data[index] = material;
+    return true;
+  }
+
   /** Fill the whole volume with one material. */
   fill(material: VoxelMaterialID): void {
     this.data.fill(material);
@@ -67,6 +80,12 @@ export class VoxelVolume {
       throw new RangeError(
         `Voxel coordinates out of bounds: (${x}, ${y}, ${z}) for size ${this.size}`,
       );
+    }
+  }
+
+  private assertIndexInBounds(index: number): void {
+    if (index < 0 || index >= this.data.length) {
+      throw new RangeError(`Voxel index out of bounds: ${index} for ${this.data.length} voxels`);
     }
   }
 }

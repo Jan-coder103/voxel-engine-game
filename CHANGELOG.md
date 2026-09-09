@@ -4,6 +4,35 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.3.0] — 2026-09-09 — Phase 5 (Editing)
+
+### Added
+
+- Voxel DDA selection raycast (`src/voxel/raycast.ts`, pure + tested):
+  cell-by-cell traversal with entry-face normals; water is not
+  targetable.
+- Editing core (`src/voxel/edits.ts`): `applyEdits` groups cell changes
+  into one `EditCommand` (previous values captured, no-ops and failed
+  cells skipped), `EditHistory` undo/redo stacks (capped at 128), and
+  the player-overlap guard for placements.
+- Persistence (`src/voxel/persistence.ts`): versioned save schema
+  (seed + terrain params + material table snapshot + edit journal),
+  migration chain (`migrateWorld`), structural validation, `SaveStore`
+  interface with in-memory and localStorage backends, and an
+  `AutosavePolicy` (20 s interval, dirty-gated).
+- World edit journal: every `setVoxel` is journaled per chunk and
+  replays on regeneration — edits survive chunk unload/prune and page
+  reloads. Saves restore on boot unless `?seed=` overrides.
+- Editing controls: LMB remove (bedrock floor protected), RMB place
+  (never into the player), MMB eyedropper, 1–7 / wheel material select,
+  Ctrl+Z / Ctrl+Y undo/redo, K save, L load.
+- HUD edit line (material, target, undo depth, save state), material
+  hotbar, wireframe target highlight, translucent placement ghost
+  tinted with the selected material, updated overlay help.
+- 35 new tests (117 total): raycast traversal/negatives/predicates,
+  edit command invariants, journal round-trips, save round-trips,
+  migration/validation errors, autosave timing.
+
 ## [0.2.0] — 2026-09-08 — Phases 2–4 (Chunks, Terrain, Materials)
 
 ### Added

@@ -22,9 +22,17 @@ export type ChunkGenerator = (chunk: Chunk) => void;
  *   responsible for loading what the player can see and touch).
  * - `setVoxel` fails in unloaded chunks and marks every chunk whose mesh
  *   depends on the voxel (own + boundary neighbors) dirty.
+ *
+ * Edit journal: every successful `setVoxel` is recorded per chunk as
+ * (local voxel index → material). When a chunk is unloaded and later
+ * regenerated (or a save is loaded before streaming reaches a chunk),
+ * the journal replays on top of the generator, so player edits survive
+ * pruning deterministically. The journal IS the persistence unit —
+ * `exportEdits`/`loadEdits` are its serialized form.
  */
 export class World {
   readonly chunks = new Map<string, Chunk>();
+  private readonly editJournal = new Map<string, Map<number, VoxelMaterialID>>();
 
   constructor(private readonly generate: ChunkGenerator = () => {}) {}
 
@@ -33,9 +41,9 @@ export class World {
   }
 
   /**
-   * Get or create a chunk. New chunks run the generator once; generating
-   * a chunk invalidates existing neighbor meshes (their boundary faces
-   * were built against air).
+   * Get or create a chunk. New chunks run the generator once, then any
+   * journaled edits for that chunk replay. Generating a chunk invalidates
+   * existing neighbor meshes (their boundary faces were built against air).
    */
   ensureChunk(x: number, y: number, z: number): Chunk {
     const existing = this.getChunk(x, y, z);
@@ -44,9 +52,46 @@ export class World {
     const coord: ChunkCoordinate = { x, y, z };
     const chunk = new Chunk(coord);
     this.generate(chunk);
+    const journaled = this.editJournal.get(chunk.key);
+    if (journaled) {
+      for (const [index, material] of journaled) chunk.volume.setByIndex(index, material);
+    }
     this.chunks.set(chunk.key, chunk);
     this.markNeighborsDirty(x, y, z);
     return chunk;
+  }
+
+  /** Number of chunks that have at least one journaled edit. */
+  get editedChunkCount(): number {
+    return this.editJournal.size;
+  }
+
+  /**
+   * Serialized form of the journal: chunk key → [voxelIndex, material][]
+   * in the volume's index layout. Pure data for the persistence layer.
+   */
+  exportEdits(): Record<string, [number, VoxelMaterialID][]> {
+    const out: Record<string, [number, VoxelMaterialID][]> = {};
+    for (const [key, edits] of this.editJournal) {
+      out[key] = [...edits.entries()];
+    }
+    return out;
+  }
+
+  /**
+   * Replace the journal with serialized edits. Loaded chunks that match a
+   * key get the edits applied immediately; unloaded chunks pick them up
+   * when `ensureChunk` generates them.
+   */
+  loadEdits(edits: Record<string, readonly [number, VoxelMaterialID][]>): void {
+    this.editJournal.clear();
+    for (const [key, entries] of Object.entries(edits)) {
+      this.editJournal.set(key, new Map(entries));
+      const chunk = this.chunks.get(key);
+      if (!chunk) continue;
+      for (const [index, material] of entries) chunk.volume.setByIndex(index, material);
+      chunk.dirty = true;
+    }
   }
 
   /** Drop a chunk's data. Render meshes must be disposed by the caller first. */
@@ -92,6 +137,14 @@ export class World {
     const ly = worldToLocal(y);
     const lz = worldToLocal(z);
     if (!chunk.volume.set(lx, ly, lz, material)) return false;
+
+    // Journal the edit so it survives unload/regeneration and persists.
+    let journaled = this.editJournal.get(chunk.key);
+    if (!journaled) {
+      journaled = new Map();
+      this.editJournal.set(chunk.key, journaled);
+    }
+    journaled.set(chunk.volume.index(lx, ly, lz), material);
 
     chunk.dirty = true;
     // Boundary voxels also change the neighbor chunk's culled faces.
