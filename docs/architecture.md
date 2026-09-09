@@ -1,6 +1,6 @@
 # Architecture
 
-Scope: what exists now (Phases 0–6) plus the boundaries already fixed for
+Scope: what exists now (Phases 0–8) plus the boundaries already fixed for
 later phases. The full decision log lives in
 `MICRO_WORLD_PROGRESS.md` (ADR-001…005); this document explains the
 practical consequences for code layout.
@@ -12,17 +12,24 @@ practical consequences for code layout.
 │ index.html / main.ts        DOM + game wiring │
 ├──────────────────────────────────────────────┤
 │ src/render/                 three.js ONLY     │  bootstrap, geometry
+│ src/audio/                  DOM adapter       │  WebAudio sfx
 ├──────────────────────────────────────────────┤
 │ src/player/                 pure simulation   │  controller (+ DOM input shim)
+│ src/persistence/            DOM adapter       │  localStorage store
 ├──────────────────────────────────────────────┤
-│ src/voxel/                  pure world state  │  coordinates, volume, mesher
+│ src/creator/                pure editor core  │  brush, selection, clipboard,
+│                                               │  prefab, inspector
+│ src/sim/                    pure event bus    │  typed GameEvent routing
+│ src/voxel/                  pure world state  │  coordinates, volume, mesher,
+│                                               │  damage, support
 └──────────────────────────────────────────────┘
 ```
 
-Dependency rule (ADR-002): arrows point downward only. `src/voxel/` and the
-`controller.ts` half of `src/player/` must stay importable in a node
-process with no DOM and no three.js. `input.ts` is a DOM adapter that
-produces plain data (`FrameInput`) for the pure controller.
+Dependency rule (ADR-002): arrows point downward only. `src/voxel/`,
+`src/creator/`, `src/sim/`, and the `controller.ts` half of `src/player/`
+must stay importable in a node process with no DOM and no three.js.
+`input.ts`, `src/audio/sfx.ts`, and `src/persistence/` are DOM adapters
+that produce/consume plain data.
 
 ## World model
 
@@ -73,6 +80,81 @@ produces plain data (`FrameInput`) for the pure controller.
 - Boot: an autosave restores unless `?seed=` names a different world;
   the tab hides → immediate save (crash-recovery window).
 
+## Creator mode (Phase 7)
+
+Everything in `src/creator/` is pure and produces edit lists; nothing
+mutates the world directly. One gesture = one `applyEdits` command, so
+undo/redo, journaling, and autosave come free.
+
+- **Brush core** (`brush.ts`): shapes (sphere/box/cylinder/noise — the
+  noise variant masks a sphere with `hash3`, the terrain integer hash,
+  so scatter is deterministic with no RNG state) × tools
+  (place/delete/paint/replace; `explode` routes to the damage module).
+  Shape tests use cell centers; bedrock (y ≤ 0) is never touched; a
+  caller-supplied `excludes` predicate enforces the player-overlap guard
+  for placement.
+- **Selection** (`selection.ts`): two clicked corners normalize into an
+  inclusive min/max box; `copyRegion` snapshots it into a dense
+  `Uint16Array` (same flat layout as `VoxelVolume`). Selections above
+  32³ are refused.
+- **Clipboard** (`clipboard.ts`): `rotateClipboardY` (90° steps around
+  Y, size axes swap on odd quarters), `mirrorClipboardX`, and material
+  remapping are pure volume transforms; `pasteEdits` flattens a snapshot
+  into an edit list (air skipped by default so pasting never gouges).
+- **Prefabs** (`prefab.ts`): versioned v1 JSON with RLE-encoded voxels,
+  validated on load (version, size, run integrity, solid count);
+  `PrefabLibrary` stores them under `prefab:` keys in any `SaveStore`
+  (the store interface gained `keys()` for enumeration).
+- **Inspector** (`inspector.ts`): pure lookups for the HUD panel
+  (material, coords, hardness from the derived strength table).
+- Render side: `CreatorViz` draws the brush ghost (wireframe
+  sphere/box/cylinder), the yellow selection wireframe, and the blue
+  paste preview box. All state lives in `main.ts`'s creator object.
+
+## Destruction (Phase 8)
+
+The pipeline: tool click → pure damage/support computation → one grouped
+`applyEdits` command → pooled render-side debris/dust → typed events →
+procedural audio. Believability over accuracy (plan §26/§105).
+
+- **Damage model** (`src/voxel/damage.ts`): `explode` walks the blast
+  bounding box; a cell fractures when its distance to the blast center
+  is within `radius · (0.35 + 0.65 · (1 − hardness))` — hard stone only
+  near the core, soft materials stripped to the edge (`hardnessOf` is a
+  derived balance table in `materials.ts`, not a serialized registry
+  field). Bedrock is immune; water is untouched (Phase 9's). Debris
+  specs are deterministic hash-sampled subsamples with radial impulses
+  and a hard cap; `debrisFromCells` does the same for collapses
+  (downward tumble). Nothing here mutates the world — callers flow the
+  edit list through `applyEdits`.
+- **Support check** (`src/voxel/support.ts`): after destructive edits,
+  `checkSupport` flood-fills 6-connected solid components over the
+  affected region (edit bounds ±`SUPPORT_MARGIN`, from bedrock up) and
+  reports cells in components that anchor to neither the bedrock layer
+  nor the region's horizontal edge. Two passes for speed: one world
+  query per cell into a flat snapshot (the `World` chunk memo makes
+  these reads cheap), then a flat-index BFS that allocates nothing per
+  cell. Above 150k region cells the check is skipped (`checked: false`).
+  The main loop collapses unsupported cells as one undoable `collapse`
+  command (debris specs captured before the edit, since they need the
+  cells' materials).
+- **Event bus** (`src/sim/events.ts`): typed `GameEvent` union
+  (`explosion`, `structureCollapsed`), synchronous dispatch, one handler
+  throwing doesn't block the rest (ADR-003 — the backbone future
+  physics/AI/audio/scripting subscribe through).
+- **Debris/dust** (`src/render/debris.ts`, `src/render/dust.ts`): each
+  is ONE `THREE.InstancedMesh` with a fixed pool (512 debris, 1024 dust)
+  and ring-buffer recycling — destruction can never accumulate objects.
+  Debris runs a tiny believable physics step (gravity, world-collision
+  bounce, friction, shrink-out); dust is buoyant voxel puffs.
+- **Audio** (`src/audio/sfx.ts`): procedural WebAudio (filtered noise
+  bursts + a sub thump) — no assets; the context resumes on the first
+  pointer-lock gesture, `N` mutes. Every method degrades to a no-op
+  without WebAudio.
+- Creation/destruction interplay: an explosion or collapse is undoable
+  like any edit, and the journal persists it — Ctrl+Z can "un-explode" a
+  crater across a reload.
+
 ## Chunk meshing and streaming
 
 - Production meshing is `meshVolumeGreedy`: the 0fps per-axis sweep —
@@ -115,7 +197,9 @@ produces plain data (`FrameInput`) for the pure controller.
   `solid` (collision) classification, lookup by id/name, and versioned
   JSON serialization that validates against the live table on load.
   Water is non-opaque and non-solid (swimming is a placeholder; players
-  wade on lake beds).
+  wade on lake beds). The Phase 8 `MATERIAL_HARDNESS` table is a
+  derived balance map next to the registry — deliberately not part of
+  the serialized schema.
 
 ## Meshing pipeline
 
@@ -168,19 +252,29 @@ depth write so lake beds stay visible.
   and validation errors, autosave timing), mesher (face counts, culling,
   winding, materials, greedy↔naive equivalence), LOD (hysteresis,
   conservative downsample), controller (gravity, landing, ledges, jump,
-  walls, sliding, step climbing).
+  walls, sliding, step climbing), creator (brush shapes/tools/bedrock/
+  guards, selection budget, clipboard transform round-trips, prefab
+  validation, corrupt-prefab handling), destruction (damage falloff by
+  hardness, bedrock/water immunity, determinism, debris caps, support
+  fixtures: pillar-roof collapse, boundary anchoring, budget skip,
+  event-bus delivery, and the 100-event debris-pool stress test).
 - Benchmarks: `benchmarks/mesher.bench.ts` (naive vs greedy, solid/
   checker/layered/terrain), `benchmarks/storage.bench.ts` (dense vs
-  packed), `benchmarks/terrain.bench.ts`. Baselines in
-  `docs/performance.md`.
+  packed), `benchmarks/terrain.bench.ts`, `benchmarks/destruction.bench.ts`
+  (blast fields, support checks). Baselines in `docs/performance.md`.
+- Headless GUI verification: `.verify/run.mjs` (local, gitignored)
+  drives the real game in Playwright Chromium through the dev-only
+  `__mw` hook — pointer lock, brush strokes, selection/clipboard/
+  prefabs, explosion + collapse gate, stress, save/reload.
 
 ## Deliberate non-goals (for now)
 
 - No worker-based meshing or transferable buffers yet (Phase 6 deferred
   item) — meshing is 2.5 ms/chunk and the frame budget absorbs it.
-- No brush/selection tooling yet (Phase 7 creator mode); editing is
-  single-voxel place/remove/paint/pick.
-- World state persists via the edit journal + seed; there is no bulk
-  chunk snapshot format yet (not needed while saves journal deltas).
-- No persisted state beyond localStorage autosave; `?seed=` URL
-  parameter starts a fresh world.
+- No gizmos/transform tools, terrain sculpt brushes (smooth/flatten/
+  raise/lower), or erosion/damage brushes — deferred from the Phase 7
+  checklist; first-person clipboard transforms cover the common cases.
+- Debris does not re-materialize as voxels (visual only; undo restores).
+- No bulk chunk snapshot format — saves stay (seed + edit journal).
+- No persisted state beyond localStorage autosave + prefabs; `?seed=`
+  starts a fresh world.

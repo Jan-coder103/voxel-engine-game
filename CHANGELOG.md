@@ -4,6 +4,83 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.6.0] — 2026-09-09 — Phase 8 (Destruction)
+
+### Added
+
+- Destruction pipeline: tool click → pure damage/support computation →
+  one grouped undoable command → pooled debris/dust → typed events →
+  procedural sound. Believable, not engineering-accurate.
+- Damage model (`src/voxel/damage.ts`): spherical blast with material
+  resistance (`hardnessOf` — hard stone only fractures near the core,
+  soft materials to the edge), bedrock immune, water untouched.
+  Deterministic hash-sampled debris specs with a hard cap;
+  `debrisFromCells` for structural collapses. One blast = one command.
+- Support check (`src/voxel/support.ts`): budgeted region flood fill
+  anchored at bedrock + region edge; unsupported components collapse as
+  one undoable `collapse` command — **the Phase 8 gate: destroying a
+  pavilion's pillar drops its roof within a frame, and Ctrl+Z rebuilds
+  it.** Snapshot + flat-index BFS (18.5 → ~10 ms worst case at house
+  scale); regions above 150k cells skip the check.
+- Event bus (`src/sim/events.ts`): typed `explosion` /
+  `structureCollapsed` events (ADR-003 backbone) with
+  throw-isolation and unsubscribe.
+- Pooled debris (`src/render/debris.ts`): one InstancedMesh, 512 pieces,
+  ring-buffer recycling, gravity/bounce/friction/settle/shrink physics
+  against the voxel grid. Dust (`src/render/dust.ts`): 1024 pooled
+  voxel puffs. **100-event stress test stays inside the pool cap.**
+- Procedural sound (`src/audio/sfx.ts`): WebAudio thud/crack/boom
+  (filtered noise + sub sweep, no assets), resumes on first gesture,
+  **N** mutes.
+- Explosion creator tool (fifth tool, radius from brush size); support
+  check runs after every destructive edit (remove, brush delete, cut,
+  explosion); HUD debris counter; destruction benchmarks; 23 new tests
+  (205 total).
+
+### Changed
+
+- `World.getVoxel` gained a one-slot chunk memo — region scans (support
+  checks) and raycasts skip most chunk-map lookups.
+
+## [0.5.0] — 2026-09-09 — Phase 7 (Creator Mode)
+
+### Added
+
+- Brush core (`src/creator/brush.ts`): sphere/box/cylinder/noise shapes
+  × place/delete/paint/replace tools producing edit lists — one stroke
+  is one grouped undoable command through `applyEdits`. Deterministic
+  noise-brush scatter via the new exported `hash3` (terrain's integer
+  hash stays byte-identical for existing seeds). Bedrock floor
+  protected; player-overlap guard for placement.
+- Box selection (`src/creator/selection.ts`): two corner clicks,
+  normalized bounds, 32³ budget, pure region copy.
+- Clipboard (`src/creator/clipboard.ts`): rotate 90° steps around Y,
+  mirror X, material remapping as pure volume transforms; paste
+  flattens to one command (air skipped by default so pasting never
+  gouges holes).
+- Prefabs (`src/creator/prefab.ts`): versioned v1 JSON with RLE voxels,
+  full structural validation; `PrefabLibrary` over any `SaveStore`
+  (store interface gained `keys()`); **O** saves, **P** cycles loads.
+- Voxel inspector (`src/creator/inspector.ts`) + derived material
+  hardness table: **I** toggles the HUD panel (coords, material,
+  hardness).
+- Creator visualizations (`src/render/creatorViz.ts`): wireframe brush
+  ghost (shape-true, tool-tinted), yellow selection box, blue paste
+  preview.
+- Controls: **C** toggles creator mode, **Q/E** cycle tools, **V**
+  cycles shapes, **[ ]** brush size 1–8, **B** box-select mode (two
+  clicks), **Ctrl+C/X/V** copy/cut/paste, **R/Shift+R** rotate
+  clipboard, **M** mirror, **O/P** prefab save/load, **I** inspector.
+- 35 new tests (182 total): shape masks, tool preconditions, bedrock/
+  player guards, transform round-trips (rotate ×4 = identity),
+  prefab validation incl. corrupt JSON, grouped-command invariants.
+
+### Fixed
+
+- `SaveStore` implementations could not enumerate keys; `keys()` added
+  to the interface, the localStorage adapter (prefix-stripping), and
+  the in-memory test store.
+
 ## [0.4.0] — 2026-09-09 — Phase 6 (Microvoxels)
 
 ### Added

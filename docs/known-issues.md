@@ -25,10 +25,65 @@ milestone goes here before it goes to the backlog.
   feature.
 - **No sprint/crouch.** Listed for the full controller (§35).
 - **Bedrock floor is protected.** The y = 0 layer cannot be removed or
-  painted (prevents accidental world-floor holes); everything above is
-  fair game.
-- **Editing is single-voxel.** Brushes/box tools are Phase 7; undo
-  groups per click, not per stroke.
+  painted (prevents accidental world-floor holes); brushes, explosions,
+  and cuts all skip it, and collapse never collects it.
+- **Editing is brush-granular.** Since Phase 7 one stroke (brush, cut,
+  paste, explosion, collapse) is one undoable command; hold-to-paint
+  continuous strokes are still one command per click.
+
+## Creator mode (Phase 7)
+
+- **Selections are capped at 32³.** A corner pair defining a bigger box
+  is refused (the click is a no-op) rather than truncated; the HUD keeps
+  the previous selection.
+- **Paste is non-solid by default.** Air cells inside a copied volume do
+  not overwrite terrain on paste (pasting never gouges holes). Solid
+  paste exists in the API but is not bound to a key.
+- **Prefab load failure is silent-ish.** A corrupt prefab JSON logs a
+  console warning and is skipped by the P-cycle; there is no HUD toast.
+- **No gizmos.** Translate/rotate/snap gizmos from the Phase 7 checklist
+  were deferred — first-person clipboard transforms (rotate/mirror keys)
+  cover the common cases. Tracked for a later creator-mode pass.
+
+## Destruction (Phase 8)
+
+- **Support anchoring is a local approximation.** `checkSupport` scans a
+  bounded region (edit bounds ±12, full height) and treats cells at the
+  region's horizontal edge as grounded. Structures wider/taller than the
+  scan region can be mis-judged: a cut-off top may collapse (believable),
+  and a component touching the scan edge stays standing even if floating.
+  The Phase 11 structural graph replaces this.
+- **Support check cost is bounded but real.** Snapshot + flat-index BFS
+  over the region: ~10 ms worst case for a fully-solid house-scale
+  region (was 18.5 ms before the snapshot pass and the World chunk
+  memo). It runs synchronously after destructive edits; a frame spike on
+  huge edits is possible. Regions above 150k cells are skipped entirely
+  (`checked: false`).
+- **Debris is visual, not material.** Collapsed voxels become pooled
+  InstancedMesh boxes that bounce, settle, and shrink away — they do not
+  re-materialize as voxels where they land (undo is the restoration
+  path). Debris pool: 512 pieces, ring-buffer recycling; dust: 1024.
+- **Explosions ignore water.** Water cells are never fractured (Phase 9
+  owns fluids); a blast under a lake leaves the water surface intact.
+- **No heat, no NPC reaction yet.** The explosion pipeline stops at
+  edits + debris + dust + sound; heat coupling arrives with fire
+  (Phase 10) and NPC reactions with Phase 12/13.
+- **Collapse debris ignores the player.** Falling pieces don't push or
+  damage the player; there is no physics body for the player-debris
+  interaction (deliberately — believable first).
+- **Sound is procedural WebAudio.** Thud/crack/boom are filtered-noise
+  envelopes, not samples; the context starts on the first pointer-lock
+  gesture and N mutes. No spatialization yet.
+
+## GUI verification (headless)
+
+- **Automated browser runs have input races.** Under SwiftShader
+  (~10 fps) Playwright can drop keydowns, and Ctrl-combos must be held
+  across a game frame (the Session-003 caveat). `.verify/run.mjs`
+  (gitignored, local) drives the game through the dev-only `__mw` hook
+  with state-verified retries; manual playtesting does not hit these.
+  The in-app Electron pane had no WebGL in this session's environment —
+  verification used Playwright's bundled Chromium headless.
 
 ## Storage / meshing / LOD
 

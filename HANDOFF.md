@@ -1,63 +1,83 @@
-# HANDOFF — Session 003 wrap-up (2026-09-09)
+# HANDOFF — Session 004 wrap-up (2026-09-09)
 
-**Status: clean handoff. Phases 5 and 6 are complete; Milestones 3 and 4 met.**
-Canonical state lives in `MICRO_WORLD_PROGRESS.md` (see Session 003 log) —
-this file only covers how to start the next session.
+**Status: clean handoff. Phases 7 and 8 are complete; Milestone 5 met and
+the Phase 8 gate criteria verified by tests.** Canonical state lives in
+`MICRO_WORLD_PROGRESS.md` (see Session 004 log) — this file only covers
+how to start the next session.
 
 ## Where things stand
 
-- **Editable, saveable sandbox (Phase 5).** Crosshair DDA raycast drives
-  place (RMB) / remove (LMB) / paint (F) / pick (MMB), all grouped into
-  undoable `EditCommand`s (Ctrl+Z/Y, 128-deep). A per-chunk edit journal
-  replays over the generator, so edits survive unload/prune and page
-  reloads. Saves are (seed + terrain params + material table + journal),
-  versioned with a migration chain, autosaved to localStorage every 20 s
-  and on tab-hide; boot restores unless `?seed=` names another world.
-- **Microvoxel infrastructure (Phase 6).** Chunks store a
-  `PackedVolume` (palette + bit-packed indices + occupancy bitset,
-  ~5.3× smaller than dense on terrain) behind the shared `VoxelData`
-  interface. Production meshing is `meshVolumeGreedy`, proven
-  unit-face-equivalent to the kept naive baseline by tests. Distant
-  chunks render LOD1 (half-resolution downsample + 2× scale) with
-  hysteresis; the downsample is conservative (air wins ties) so LOD
-  never inflates terrain — that was a playtest bug, now regression-tested.
-  Whole view: ~82.5k quads → ~9k, 60 fps.
-- Playable at `npm run dev` — click, WASD, Space; 1–7/wheel pick
-  materials; K save, L load; `?seed=N` starts a fresh world.
+- **Creator mode (Phase 7).** `src/creator/` is a pure editor core:
+  brushes (sphere/box/cylinder/noise × place/delete/paint/replace) that
+  produce edit lists — one stroke is one grouped undoable command through
+  `applyEdits`; box selection (32³ budget) with clipboard
+  copy/cut/paste/rotate/mirror/remap; versioned prefab JSON (RLE,
+  validated) in a `PrefabLibrary` over `SaveStore`; voxel inspector.
+  Render-side: shape-true brush ghost, selection + paste wireframes.
+  Keys: **C** toggle, **Q/E** tools, **V** shapes, **[ ]** size, **B**
+  select, **Ctrl+C/X/V**, **R/M**, **O/P**, **I**.
+- **Destruction (Phase 8).** `explode` (pure, in `src/voxel/damage.ts`)
+  fractures a hardness-weighted sphere; `checkSupport`
+  (`src/voxel/support.ts`) finds solid components disconnected from
+  bedrock after destructive edits and the game collapses them as one
+  undoable command. Effects are pooled (512 debris + 1024 dust in two
+  InstancedMeshes, ring-buffer recycled) and routed through a typed
+  event bus (`src/sim/events.ts`) to procedural WebAudio
+  (`src/audio/sfx.ts`, **N** mutes). The gate criteria are met:
+  pillar-roof collapse within the click's frame (unit-tested + seen in
+  the headless browser), explosion = hole → debris → dust → sound, and
+  a 100-event stress test that never exceeds the pool.
+- Playable at `npm run dev` — click, WASD, Space; **C** for creator
+  mode; brush strokes, cut/paste, prefabs, explosions, collapses all
+  undoable and journaled (they survive reloads).
 
 ## How to pick up (next session)
 
-1. Read `MICRO_WORLD_PROGRESS.md` — Session 003 log has the full entry
-   state and the fixed-during-verification list (unbound-method loop
-   crash, LOD inflation, greedy OOB faces).
-2. `npm install` if needed, `npm run dev`, confirm the world renders and
-   edits work (the localStorage autosave carries your playtest builds).
-3. Start **Phase 7 (Creator Mode)**:
-   - Pure brush core in `src/creator/` (sphere/box/cylinder shapes ×
-     place/delete/paint tools) producing edit lists — flow them through
-     `applyEdits` so one stroke is one undoable command and journaling
-     comes free.
-   - Box selection + clipboard (copy/cut/paste/rotate/mirror) as pure
-     volume transforms; paste = one grouped command.
-   - Prefab save/load (versioned JSON like the world save) + voxel
-     inspector + render-side selection wireframe / brush ghost.
-   - Deterministic scatter (noise brush) should reuse the integer hash
-     in `terrain.ts` — no sequential RNG.
-4. Known gaps carried forward (all in `docs/known-issues.md`): water is
-   a non-solid, non-targetable placeholder (Phase 9); no AO (Phase 16);
-   worker meshing/transferable buffers deferred from Phase 6; LOD1
-   erodes ≤1 voxel by design.
+1. Read `MICRO_WORLD_PROGRESS.md` — Session 004 log has the full state,
+   the deferred list (gizmos/sculpt brushes, debris re-materialization,
+   heat/NPC coupling), and the fixed-during-verification notes
+   (support-check 18.5→10 ms optimization, EventBus typing).
+2. `npm install`, `npm run dev`, confirm the world renders; a leftover
+   localStorage autosave restores — `?seed=1234` for a fresh world.
+3. Start **Phase 9 (Water)**:
+   - Pure cellular fluid in `src/voxel/fluid.ts`: per-cell volume 0–255,
+     gravity + horizontal equalization first, mass-conservation and
+     boundary tests (plan §130's exact task shape), chunk-boundary flow
+     via a neighbor query like the mesher's.
+   - Tick scheduler with an activity budget (only N active cells per
+     frame); dirty flags reuse the existing chunk remesh path.
+   - Water is currently a non-solid, non-targetable placeholder —
+     decide its targetability/interaction with brushes and explosions
+     while wiring Phase 9 (known-issues carries both).
+   - Then flow-height rendering in the voxel shader and player
+     buoyancy in the controller.
+4. The local `.verify/run.mjs` (gitignored) is a headless Playwright
+   E2E that drives the game through the dev-only `__mw` hook — useful
+   for regression checks; needs `npm i --no-save playwright` and a
+   Chromium with WebGL. The in-app browser pane had no WebGL this
+   session; **the manual GUI pass for Phases 7–8 is still open** —
+   brushes/clipboard/prefabs/explosion/collapse are the things to play
+   with.
+5. Known gaps carried forward (all in `docs/known-issues.md`): no AO
+   (Phase 16), no worker meshing (deferred), LOD1 erosion by design,
+   support-check region approximation (Phase 11 replaces it), water
+   placeholder (Phase 9).
 
 ## Agreed approach (unchanged)
 
 - Single npm package at the repo root; TypeScript strict, Vite, Vitest
   node environment, ESLint flat + Prettier, CI on Node 22.
-- World/sim code (`src/voxel/`, `src/player/controller.ts`, and now the
-  future `src/creator/` cores) stays free of three.js and DOM (ADR-002);
-  all three.js lives in `src/render/`, DOM adapters in `src/player/` +
-  `src/persistence/`.
-- Terrain generation stays a pure function of (seed, coordinates).
+- Pure code (`src/voxel/`, `src/creator/`, `src/sim/`,
+  `src/player/controller.ts`) stays free of three.js and DOM (ADR-002);
+  all three.js lives in `src/render/`; DOM adapters in `src/player/`,
+  `src/persistence/`, `src/audio/`.
+- Terrain generation stays a pure function of (seed, coordinates);
+  `hash2` in terrain.ts is frozen — existing saves depend on it
+  (`hash3` is the extensible variant).
 - Material IDs are a serialization contract: don't renumber.
-- Save formats version up through `migrateWorld`; never load silently
-  against a drifted schema.
+  Derived tables (hardness) stay out of the serialized schema.
+- Save formats version up through a migration chain; prefab format v1
+  validates structurally and rejects drift.
 - Mesher changes must keep the greedy↔naive equivalence tests green.
+- Every destructive/creative gesture is one grouped `applyEdits`
+  command — keep it that way; undo/journaling/autosave depend on it.

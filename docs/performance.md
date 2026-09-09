@@ -71,7 +71,34 @@ meshing stays mesh-bound — a greedy mesh through `PackedVolume`
 
 Generation remains an order of magnitude cheaper than meshing.
 
-## Runtime (dev session, Phase 5–6 demo)
+## Baselines — destruction (`benchmarks/destruction.bench.ts`)
+
+2026-09-09, same machine (worst case: fully-solid stone world, i.e.
+every scanned cell is real work):
+
+| Scene                                        | ≈ time/op |
+| -------------------------------------------- | --------- |
+| explode r=6 in solid stone                   | ~4.5 ms   |
+| explode r=10 in solid stone (creator max)    | ~6.6 ms   |
+| support check — house-scale region (25×37×25)| ~10 ms    |
+| support check — supported terrain region     | ~14 ms    |
+
+Reading: an explosion click costs ~5 ms of damage-field + debris-spec
+computation, and the follow-up support check ~10–14 ms — together a
+single-frame spike within the 16.6 ms budget, once per edit (not per
+frame). The support check originally measured 18.5 ms; the fix was
+structural: snapshot the region's solidity with one world query per
+cell (the `World` one-slot chunk memo removes most map lookups on the
+x-fastest scan), then BFS over the flat buffer with inline index math
+and zero per-cell allocations. Regions above 150k cells skip the check
+entirely (budgeted, reported as `checked: false`).
+
+Debris/dust stepping is pool-bounded by construction: 512 debris +
+1024 dust instances in two InstancedMeshes, updated in ~0.1 ms per
+frame regardless of how many explosions fired (ring-buffer recycling;
+verified by the 100-event stress test in `tests/debrisPool.test.ts`).
+
+## Runtime (dev session, Phase 5–8 demo)
 
 - 60 fps (vsync-capped) in the in-app browser at 1280×720 with render
   radius 6: 226 chunk meshes (88 at LOD1), ~8.8–9.1k quads, empty
@@ -80,6 +107,11 @@ Generation remains an order of magnitude cheaper than meshing.
   a single edit remeshes 1–2 chunks).
 - LOD1 switches remesh within the same budget; transitions are not
   perceptible as hitches.
+- Explosions/collapses (Phase 8) add a one-frame ~15 ms CPU spike for
+  the damage field + support check at house scale; debris/dust then
+  cost a fixed, pool-bounded step per frame. Headless verification
+  (software WebGL) held ~12–17 fps with 200+ active debris pieces —
+  the cap holds the floor; on real hardware the render path is GPU-bound.
 
 ## Known gaps in measurement
 
