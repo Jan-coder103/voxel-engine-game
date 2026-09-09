@@ -56,9 +56,14 @@ interface ChunkEntry {
 
 export interface ChunkMeshManagerParams {
   streaming: StreamingParams;
-  /** Max chunks meshed per update (new + remeshed + LOD switches). */
+  /** Max chunks meshed per frame (new + remeshed + LOD switches). */
   meshBudgetPerFrame: number;
   lod?: LodParams;
+  /**
+   * Fluid levels at world coordinates (Phase 9), 0–255; LOD0 water meshes
+   * use them for flow-height rendering. LOD1 water renders as full cubes.
+   */
+  waterLevels?: (x: number, y: number, z: number) => number;
 }
 
 const DEFAULT_PARAMS: ChunkMeshManagerParams = {
@@ -198,9 +203,18 @@ export class ChunkMeshManager {
     // the neighbor's material class, and LOD seams are far away).
     const volume =
       lod === 0 ? chunk.volume : downsampleVolume(chunk.volume, LOD1_FACTOR);
-    const stride = lod === 0 ? 1 : LOD1_FACTOR;
-    const mesh = meshVolumeGreedy(volume, (lx, ly, lz) =>
-      this.world.getVoxel(origin.x + lx * stride, origin.y + ly * stride, origin.z + lz * stride),
+    const stride = lod === 1 ? LOD1_FACTOR : 1;
+    // Flow heights only exist at full resolution (LOD1 water = full cube).
+    const waterLevels =
+      lod === 0 ? this.params.waterLevels : undefined;
+    const mesh = meshVolumeGreedy(
+      volume,
+      (lx, ly, lz) =>
+        this.world.getVoxel(origin.x + lx * stride, origin.y + ly * stride, origin.z + lz * stride),
+      waterLevels
+        ? (lx, ly, lz) =>
+            waterLevels(origin.x + lx, origin.y + ly, origin.z + lz)
+      : undefined,
     );
 
     const entry: ChunkEntry = existing ?? {

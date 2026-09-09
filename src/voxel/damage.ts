@@ -13,7 +13,9 @@ import { hash3 } from './terrain';
  * Believability over accuracy: a cell fractures when the blast reaches it
  * "strongly enough" for its hardness — soft materials are stripped to the
  * blast edge, hard stone only near the core. Bedrock (y ≤ 0) is immune.
- * Water belongs to the Phase 9 fluid system and is never affected.
+ * Water (Phase 9) is vaporized within reach — no debris, no resistance —
+ * and the fluid system then floods the crater back from surrounding
+ * sources.
  */
 
 /**
@@ -72,7 +74,7 @@ export function explode(
     for (let z = minZ; z <= maxZ; z++) {
       for (let x = minX; x <= maxX; x++) {
         const material = query(x, y, z);
-        if (material === AIR || material === WATER) continue;
+        if (material === AIR) continue;
         const dx = x + 0.5 - center.x;
         const dy = y + 0.5 - center.y;
         const dz = z + 0.5 - center.z;
@@ -80,6 +82,8 @@ export function explode(
         const reach = radius * (CORE_FRACTION + (1 - CORE_FRACTION) * (1 - hardnessOf(material)));
         if (dist > reach) continue;
         edits.push({ x, y, z, material: AIR });
+        // Water vaporizes with no debris; only solids fracture into pieces.
+        if (material === WATER) continue;
         hitCells.push({ x, y, z });
         hitMaterials.push(material);
       }

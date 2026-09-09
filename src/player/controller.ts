@@ -22,6 +22,13 @@ export interface PlayerState {
   pitch: number;
   /** True while standing on a solid voxel (refreshed every step). */
   onGround: boolean;
+  /** True while any part of the player is in water (refreshed every step). */
+  inWater: boolean;
+  /**
+   * True for the step after a water wall-assist fired, so the boost
+   * survives the swim-speed cap while the player hauls over a ledge.
+   */
+  climbBoost: boolean;
 }
 
 export interface FrameInput {
@@ -45,6 +52,26 @@ export const GRAVITY = 24;
 /** Jump velocity for a ~1.1 voxel-high hop: v² / (2g) ≈ 1.08 m. */
 export const JUMP_SPEED = 7.2;
 
+// --- Water (Phase 9) -------------------------------------------------------
+/** Reduced gravity while in water (buoyancy counteracts most of it). */
+export const WATER_GRAVITY = 5;
+/** Exponential vertical drag per second in water (damps falls and rises). */
+export const WATER_DRAG = 3.2;
+/** Terminal sinking speed in water. */
+export const WATER_SINK_SPEED = 2.2;
+/** Maximum upward swim speed while holding jump in water. */
+export const WATER_SWIM_SPEED = 3.4;
+/** Swim acceleration while holding jump in water. */
+export const WATER_SWIM_ACCEL = 18;
+/** Horizontal speed multiplier while wading/swimming. */
+export const WATER_WALK_FACTOR = 0.55;
+/**
+ * Wall-assist burst when swimming against a ledge holding jump. Tall
+ * enough to ballistic-clear a one-voxel shore above the waterline
+ * (v²/2g ≈ 1.7 m) — hauling out of a pool is a real hop.
+ */
+export const WATER_CLIMB_SPEED = 9;
+
 const EPS = 1e-7;
 
 export function createPlayerState(spawn: WorldCoordinate): PlayerState {
@@ -54,6 +81,8 @@ export function createPlayerState(spawn: WorldCoordinate): PlayerState {
     yaw: Math.PI, // face +Z toward the demo cube
     pitch: 0,
     onGround: false,
+    inWater: false,
+    climbBoost: false,
   };
 }
 
@@ -102,16 +131,44 @@ function aabbIntersectsSolid(
 }
 
 /**
- * Advance the player one fixed timestep: look, jump, gravity, then
- * move-and-collide along Y, X, Z in that order.
+ * True if the height `py` is below the water surface in its cell.
+ * `waterAt` reports the cell's fluid level (0–255).
+ */
+function submergedAt(
+  waterAt: (x: number, y: number, z: number) => number,
+  px: number,
+  py: number,
+  pz: number,
+): boolean {
+  const cx = Math.floor(px);
+  const cy = Math.floor(py);
+  const cz = Math.floor(pz);
+  const level = waterAt(cx, cy, cz);
+  return level > 0 && cy + level / 255 > py;
+}
+
+/**
+ * Advance the player one fixed timestep: look, jump, gravity (buoyant in
+ * water), then move-and-collide along Y, X, Z in that order. The optional
+ * `waterAt` query enables swimming/buoyancy (Phase 9); without it the
+ * player ignores water exactly as before.
  */
 export function stepPlayer(
   state: PlayerState,
   input: FrameInput,
   solidAt: (x: number, y: number, z: number) => boolean,
   dt: number,
+  waterAt?: (x: number, y: number, z: number) => number,
 ): void {
   applyLook(state, input);
+
+  // Water probes: slightly above the feet (wading) and at the eye
+  // (submerged). Either counts as "in water".
+  const p = state.position;
+  const eye = eyePosition(state);
+  state.inWater =
+    waterAt !== undefined &&
+    (submergedAt(waterAt, p.x, p.y + 0.2, p.z) || submergedAt(waterAt, eye.x, eye.y, eye.z));
 
   // Horizontal wish direction in world space, normalized so diagonals
   // aren't faster.
@@ -124,18 +181,34 @@ export function stepPlayer(
     wishX /= wishLength;
     wishZ /= wishLength;
   }
-  state.velocity.x = wishX * WALK_SPEED;
-  state.velocity.z = wishZ * WALK_SPEED;
+  const speed = state.inWater ? WALK_SPEED * WATER_WALK_FACTOR : WALK_SPEED;
+  state.velocity.x = wishX * speed;
+  state.velocity.z = wishZ * speed;
 
   if (input.jump && state.onGround) {
     state.velocity.y = JUMP_SPEED;
     state.onGround = false;
   }
-  state.velocity.y -= GRAVITY * dt;
+  if (state.inWater) {
+    // Buoyant vertical motion: weak gravity, strong drag, capped rise and
+    // sink; holding jump swims up. A climb boost (set at the end of the
+    // previous step) is exempt from the swim cap for this one step so the
+    // wall-assist burst can carry the player over a ledge.
+    state.velocity.y -= WATER_GRAVITY * dt;
+    if (input.jump) state.velocity.y += WATER_SWIM_ACCEL * dt;
+    const damp = Math.max(0, 1 - WATER_DRAG * dt);
+    state.velocity.y *= damp;
+    if (state.velocity.y < -WATER_SINK_SPEED) state.velocity.y = -WATER_SINK_SPEED;
+    const riseCap = state.climbBoost ? WATER_CLIMB_SPEED : WATER_SWIM_SPEED;
+    if (state.velocity.y > riseCap) state.velocity.y = riseCap;
+  } else {
+    state.velocity.y -= GRAVITY * dt;
+  }
+  state.climbBoost = false;
 
   const half = PLAYER_WIDTH / 2;
-  const p = state.position;
   const v = state.velocity;
+  let hitWall = false;
 
   // Y axis: land on floors / bump ceilings.
   p.y += v.y * dt;
@@ -181,6 +254,7 @@ export function stepPlayer(
     } else if (v.x < 0) {
       p.x = Math.floor(p.x - half - EPS) + 1 + half + EPS;
     }
+    if (v.x !== 0) hitWall = true;
     v.x = 0;
   }
 
@@ -202,6 +276,14 @@ export function stepPlayer(
     } else if (v.z < 0) {
       p.z = Math.floor(p.z - half - EPS) + 1 + half + EPS;
     }
+    if (v.z !== 0) hitWall = true;
     v.z = 0;
+  }
+
+  // Water edge assist: pressed against a ledge while swimming and holding
+  // jump → hop onto it (without this, 1-voxel shores are unclimbable).
+  if (state.inWater && hitWall && input.jump) {
+    state.velocity.y = Math.max(state.velocity.y, WATER_CLIMB_SPEED);
+    state.climbBoost = true;
   }
 }

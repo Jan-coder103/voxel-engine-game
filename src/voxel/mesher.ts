@@ -98,6 +98,12 @@ export interface MeshData {
   /** Triangle indices, 6 per quad. */
   indices: Uint32Array;
   readonly quadCount: number;
+  /**
+   * Water flow height (greedy mesher, water pass only): how far each
+   * vertex's corner sinks, [0, 1) — (255 − level) / 255 on the top edge
+   * of surface cells, 0 elsewhere. The water shader subtracts it from Y.
+   */
+  waterDrop?: Float32Array;
 }
 
 /** Opaque and water passes for one volume (water renders transparent). */

@@ -68,6 +68,16 @@ describe('save migration + validation', () => {
     expect(migrateWorld(payload)).toEqual(payload);
   });
 
+  it('migrates a v1 save to v2 with empty fluid levels', () => {
+    const v1 = JSON.parse(JSON.stringify(serializeWorld(worldWithEdits(), TERRAIN)));
+    v1.version = 1;
+    delete v1.waterLevels;
+    const migrated = migrateWorld(v1);
+    expect(migrated.version).toBe(2);
+    expect(migrated.waterLevels).toEqual({});
+    expect(migrated.edits).toEqual(v1.edits);
+  });
+
   it('rejects a newer save version with a clear error', () => {
     const payload = { ...JSON.parse(JSON.stringify(serializeWorld(worldWithEdits(), TERRAIN))), version: 99 };
     expect(() => migrateWorld(payload)).toThrow(/newer than this build/);
@@ -79,20 +89,45 @@ describe('save migration + validation', () => {
   });
 
   it('rejects payloads missing required blocks', () => {
-    expect(() => migrateWorld({ version: 1 })).toThrow(/seed/);
-    expect(() => migrateWorld({ version: 1, seed: 1 })).toThrow(/terrain/);
+    expect(() => migrateWorld({ version: 2 })).toThrow(/seed/);
+    expect(() => migrateWorld({ version: 2, seed: 1 })).toThrow(/terrain/);
     expect(() =>
-      migrateWorld({ version: 1, seed: 1, terrain: TERRAIN }),
+      migrateWorld({ version: 2, seed: 1, terrain: TERRAIN }),
     ).toThrow(/materials/);
     expect(() =>
-      migrateWorld({ version: 1, seed: 1, terrain: TERRAIN, materials: { version: 1, materials: [] } }),
+      migrateWorld({ version: 2, seed: 1, terrain: TERRAIN, materials: { version: 1, materials: [] } }),
     ).toThrow(/edits/);
+    expect(() =>
+      migrateWorld({
+        version: 2,
+        seed: 1,
+        terrain: TERRAIN,
+        materials: { version: 1, materials: [] },
+        edits: {},
+      }),
+    ).toThrow(/waterLevels/);
   });
 
   it('rejects malformed edit entries', () => {
     const payload = JSON.parse(JSON.stringify(serializeWorld(worldWithEdits(), TERRAIN)));
     payload.edits['0,0,0'] = [[1, 2, 3]]; // [index, material, junk]
     expect(() => migrateWorld(payload)).toThrow(/malformed/);
+  });
+
+  it('rejects malformed fluid level entries (0/255/non-integer)', () => {
+    for (const bad of [0, 255, -1, 1.5]) {
+      const payload = JSON.parse(JSON.stringify(serializeWorld(worldWithEdits(), TERRAIN)));
+      payload.waterLevels = { '0,0,0': [[3, bad]] };
+      expect(() => migrateWorld(payload)).toThrow(/water levels.*malformed/);
+    }
+  });
+
+  it('round-trips fluid levels through serialize/deserialize', () => {
+    const levels: Record<string, [number, number][]> = { '0,0,0': [[5, 200], [130, 1]] };
+    const data = deserializeWorld(
+      JSON.stringify(serializeWorld(worldWithEdits(), TERRAIN, 1234, levels)),
+    );
+    expect(data.waterLevels).toEqual(levels);
   });
 
   it('deserializeWorld fails on a corrupted material table', () => {

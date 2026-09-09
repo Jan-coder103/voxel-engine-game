@@ -1,9 +1,10 @@
 import type { WorldCoordinate } from '../voxel/coordinates';
-import { getMaterial, hardnessOf, type VoxelMaterialID } from '../voxel/materials';
+import { getMaterial, hardnessOf, WATER, type VoxelMaterialID } from '../voxel/materials';
 
 /**
  * Voxel inspector (Phase 7): structured lookups for the HUD panel. Pure —
  * takes a voxel query, returns display data; main.ts formats it.
+ * Since Phase 9 it also reports a water cell's fluid level.
  */
 
 export interface VoxelInspection {
@@ -13,6 +14,8 @@ export interface VoxelInspection {
   colorHex: number;
   /** Relative destruction resistance [0, 1]. */
   hardness: number;
+  /** Fluid level 0–255 when inspecting water, else undefined. */
+  water?: number;
 }
 
 /** Inspect one cell; `query` is usually `world.getVoxel`. */
@@ -21,6 +24,7 @@ export function inspectVoxel(
   x: number,
   y: number,
   z: number,
+  waterLevel?: number,
 ): VoxelInspection {
   const material = query(x, y, z);
   const def = getMaterial(material);
@@ -30,12 +34,14 @@ export function inspectVoxel(
     name: def.name,
     colorHex: def.color,
     hardness: hardnessOf(material),
+    water: material === WATER ? (waterLevel ?? 0) : undefined,
   };
 }
 
 /** One-line HUD summary of a cell (or the "no target" placeholder). */
 export function formatInspection(inspection: VoxelInspection | undefined): string {
   if (!inspection) return 'inspect —';
-  const { coords, name, hardness } = inspection;
-  return `inspect ${coords.x},${coords.y},${coords.z} ${name} · hardness ${hardness.toFixed(2)}`;
+  const { coords, name, hardness, water } = inspection;
+  const waterText = water !== undefined ? ` · water ${water}/255` : '';
+  return `inspect ${coords.x},${coords.y},${coords.z} ${name} · hardness ${hardness.toFixed(2)}${waterText}`;
 }

@@ -12,8 +12,10 @@ import { MATERIALS } from '../voxel/materials';
  * stays correct on the greedy mesher's merged quads — a per-vertex
  * voxel-origin attribute would smear across them.
  *
- * Water is the same shader with transparency, no depth write, and both
- * faces visible (swimming under the surface sees it).
+ * Water (Phase 9) adds transparency, double-sided rendering, no depth
+ * write (lake beds stay visible), and its own vertex shader that sinks
+ * top vertices by the mesher's `waterDrop` attribute — flowing water
+ * renders partially filled.
  */
 
 export interface VoxelMaterialSet {
@@ -40,6 +42,30 @@ void main() {
   vNormal = normal;
   vMaterialId = materialId;
   vec4 world = modelMatrix * vec4(position, 1.0);
+  vWorldPos = world.xyz;
+  vec4 mv = viewMatrix * world;
+  vFogDepth = -mv.z;
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+/** Water variant (Phase 9): sinks vertices by their flow-height drop so
+ * surface cells render partially filled. Drops are 0 at LOD1 (full cube). */
+const WATER_VERT = /* glsl */ `
+attribute float materialId;
+attribute float waterDrop;
+
+varying vec3 vNormal;
+varying vec3 vWorldPos;
+varying float vMaterialId;
+varying float vFogDepth;
+
+void main() {
+  vNormal = normal;
+  vMaterialId = materialId;
+  vec3 p = position;
+  p.y -= waterDrop;
+  vec4 world = modelMatrix * vec4(p, 1.0);
   vWorldPos = world.xyz;
   vec4 mv = viewMatrix * world;
   vFogDepth = -mv.z;
@@ -126,9 +152,13 @@ export function createVoxelMaterials(options: VoxelMaterialOptions): VoxelMateri
     uFogFar: { value: options.fogFar },
   };
 
-  const make = (extra: Record<string, { value: unknown }>, transparent: boolean) =>
+  const make = (
+    vertexShader: string,
+    extra: Record<string, { value: unknown }>,
+    transparent: boolean,
+  ) =>
     new THREE.ShaderMaterial({
-      vertexShader: VERT,
+      vertexShader,
       fragmentShader: FRAG,
       uniforms: { ...shared, ...extra },
       transparent,
@@ -136,8 +166,8 @@ export function createVoxelMaterials(options: VoxelMaterialOptions): VoxelMateri
       side: transparent ? THREE.DoubleSide : THREE.FrontSide,
     });
 
-  const opaque = make({ uOpacity: { value: 1 }, uVariation: { value: 0.04 } }, false);
-  const water = make({ uOpacity: { value: 0.62 }, uVariation: { value: 0.01 } }, true);
+  const opaque = make(VERT, { uOpacity: { value: 1 }, uVariation: { value: 0.04 } }, false);
+  const water = make(WATER_VERT, { uOpacity: { value: 0.62 }, uVariation: { value: 0.01 } }, true);
 
   return {
     opaque,

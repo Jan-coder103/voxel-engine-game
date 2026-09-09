@@ -52,7 +52,7 @@ describe('explode', () => {
     expect(rDirt.destroyed).toBeGreaterThan(rStone.destroyed);
   });
 
-  it('never touches bedrock or water', () => {
+  it('never touches bedrock; water vaporizes without debris', () => {
     const world = new World((chunk) => chunk.volume.fill(WATER));
     world.ensureChunk(0, 0, 0);
     world.setVoxel(5, 0, 5, STONE); // bedrock floor is stone at y=0
@@ -60,8 +60,18 @@ describe('explode', () => {
       seed: 3,
       maxDebris: 16,
     });
-    expect(result.edits).toHaveLength(0);
+    // Water within reach becomes air (Phase 9 vaporization)...
+    expect(result.edits.length).toBeGreaterThan(0);
+    for (const edit of result.edits) {
+      expect(edit.y).toBeGreaterThan(0); // bedrock immune
+      expect(edit.material).toBe(AIR);
+    }
+    // ...but never fractures into debris and does not count as destroyed.
     expect(result.debris).toHaveLength(0);
+    expect(result.destroyed).toBe(0);
+    applyEdits(world, result.edits, 'blast');
+    expect(world.getVoxel(5, 1, 5)).toBe(AIR); // core water vaporized
+    expect(world.getVoxel(5, 0, 5)).toBe(STONE); // bedrock intact
   });
 
   it('ignores air cells and reports only real fractures', () => {

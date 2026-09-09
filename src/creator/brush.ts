@@ -120,7 +120,9 @@ export function brushEdits(
     let target: VoxelMaterialID | undefined;
     switch (brush.tool) {
       case 'place':
-        if (current === AIR) target = brush.material;
+        // Placement into water displaces it (Phase 9); placement builds in
+        // air as before.
+        if (current === AIR || current === WATER) target = brush.material;
         break;
       case 'delete':
         if (current !== AIR) target = AIR;
@@ -134,9 +136,11 @@ export function brushEdits(
         }
         break;
     }
-    // Water is never painted over nor a paint target; it belongs to Phase 9.
     if (target === undefined) continue;
-    if (brush.tool !== 'delete' && (current === WATER || target === WATER)) continue;
+    // Water is a first-class placeable material (Phase 9): placing it
+    // creates fluid sources. Paint/replace still skip water cells — the
+    // fluid owns them; delete and place are the sanctioned interactions.
+    if (current === WATER && brush.tool !== 'delete' && brush.tool !== 'place') continue;
     edits.push({ x: cell.x, y: cell.y, z: cell.z, material: target });
   }
   return edits;

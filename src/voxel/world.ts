@@ -40,6 +40,16 @@ export class World {
   private cachedAtY = NaN;
   private cachedAtZ = NaN;
 
+  /**
+   * Optional observer hooks (Phase 9): the fluid simulation subscribes to
+   * stay in sync with world mutations it did not perform. `onVoxelChanged`
+   * fires after every successful `setVoxel` (edits, undo/redo, sim writes);
+   * `onChunkReady` fires once at the end of `ensureChunk` (after journal
+   * replay). Both are plain fields so tests can attach/detach freely.
+   */
+  onVoxelChanged?: (x: number, y: number, z: number, material: VoxelMaterialID) => void;
+  onChunkReady?: (chunk: Chunk) => void;
+
   constructor(private readonly generate: ChunkGenerator = () => {}) {}
 
   getChunk(x: number, y: number, z: number): Chunk | undefined {
@@ -79,6 +89,7 @@ export class World {
     this.chunks.set(chunk.key, chunk);
     this.invalidateChunkCache();
     this.markNeighborsDirty(x, y, z);
+    this.onChunkReady?.(chunk);
     return chunk;
   }
 
@@ -177,6 +188,7 @@ export class World {
     if (ly === CHUNK_SIZE - 1) this.markDirty(cx, cy + 1, cz);
     if (lz === 0) this.markDirty(cx, cy, cz - 1);
     if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cy, cz + 1);
+    this.onVoxelChanged?.(x, y, z, material);
     return true;
   }
 

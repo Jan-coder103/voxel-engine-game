@@ -13,6 +13,7 @@ import {
 } from './voxel/materials';
 import { raycastVoxels, type RaycastHit } from './voxel/raycast';
 import { applyEdits, EditHistory, intersectsPlayerCell, type VoxelEdit } from './voxel/edits';
+import { FluidSim } from './voxel/fluid';
 import { debrisFromCells, explode } from './voxel/damage';
 import { checkSupport, supportRegionFor } from './voxel/support';
 import {
@@ -74,6 +75,8 @@ const MESH_BUDGET_PER_FRAME = 3;
 const RESPAWN_HEIGHT = -32;
 const FIXED_DT = 1 / 60;
 const MAX_SUBSTEPS = 5;
+/** Fluid cells simulated per fixed step (Phase 9 activity budget). */
+const FLUID_CELLS_PER_TICK = 384;
 
 const EDIT_REACH = 6;
 const AUTOSAVE_INTERVAL_MS = 20_000;
@@ -122,7 +125,11 @@ function main(): void {
   const { terrain, restore } = resolveBoot(store);
 
   const world = new World((chunk) => generateChunk(chunk, terrain));
-  if (restore) world.loadEdits(restore.edits);
+  const fluid = new FluidSim(world); // before any chunk generation (hooks)
+  if (restore) {
+    world.loadEdits(restore.edits);
+    fluid.loadLevels(restore.waterLevels ?? {});
+  }
   const history = new EditHistory();
 
   const SPAWN = findSpawn(terrain);
@@ -146,6 +153,7 @@ function main(): void {
 const chunkMeshes = new ChunkMeshManager(engine.scene, world, materials, {
   streaming: streamingParams(RENDER_RADIUS),
   meshBudgetPerFrame: MESH_BUDGET_PER_FRAME,
+  waterLevels: (x, y, z) => fluid.levelAt(x, y, z),
 });
 const selectionViz = new SelectionViz(engine.scene);
 const creatorViz = new CreatorViz(engine.scene);
@@ -385,7 +393,7 @@ const creatorViz = new CreatorViz(engine.scene);
   };
 
   const saveNow = (): void => {
-    const payload = serializeWorld(world, terrain, Date.now());
+    const payload = serializeWorld(world, terrain, Date.now(), fluid.exportLevels());
     store.set(AUTOSAVE_KEY, JSON.stringify(payload));
     lastSaveAt = performance.now();
   };
@@ -466,13 +474,15 @@ const creatorViz = new CreatorViz(engine.scene);
       edit([{ ...hit.voxel, material: AIR }], 'remove');
       runSupportCheck(hit.voxel, hit.voxel);
     } else if (button === 2) {
-      // Place into the face-adjacent cell, never into the player.
+      // Place into the face-adjacent cell, never into the player. Water
+      // cells may be filled (the fluid treats it as displacement).
       const cell = hit.normal;
       if (cell.x === 0 && cell.y === 0 && cell.z === 0) return;
       const x = hit.voxel.x + cell.x;
       const y = hit.voxel.y + cell.y;
       const z = hit.voxel.z + cell.z;
-      if (world.getVoxel(x, y, z) !== AIR) return;
+      const current = world.getVoxel(x, y, z);
+      if (current !== AIR && current !== WATER) return;
       if (
         intersectsPlayerCell({ x, y, z }, player.position, PLAYER_WIDTH / 2, PLAYER_HEIGHT)
       ) {
@@ -541,6 +551,7 @@ const creatorViz = new CreatorViz(engine.scene);
       try {
         const data = deserializeWorld(saved);
         world.loadEdits(data.edits);
+        fluid.loadLevels(data.waterLevels ?? {});
         history.clear();
         autosave.markDirty();
       } catch (error) {
@@ -620,7 +631,7 @@ const creatorViz = new CreatorViz(engine.scene);
     while (accumulator >= FIXED_DT) {
       const frameInput = input.takeFrameInput();
       if (input.isLocked) {
-        stepPlayer(player, frameInput, solidAt, FIXED_DT);
+        stepPlayer(player, frameInput, solidAt, FIXED_DT, (x, y, z) => fluid.levelAt(x, y, z));
         for (const click of input.consumeClicks()) applyClick(click);
         for (const key of input.consumeKeyPresses()) applyKey(key);
         const wheel = input.consumeWheelSteps();
@@ -632,6 +643,10 @@ const creatorViz = new CreatorViz(engine.scene);
         input.consumeKeyPresses();
         input.consumeWheelSteps();
       }
+      // Water simulation runs every fixed step, locked or not; the
+      // activity budget keeps the cost bounded while floods spread.
+      fluid.tick(FLUID_CELLS_PER_TICK);
+      if (fluid.takeDirty()) autosave.markDirty();
       accumulator -= FIXED_DT;
     }
 
@@ -659,7 +674,10 @@ const creatorViz = new CreatorViz(engine.scene);
       const gz = hit.voxel.z + hit.normal.z;
       const placeableCell =
         (hit.normal.x !== 0 || hit.normal.y !== 0 || hit.normal.z !== 0) &&
-        world.getVoxel(gx, gy, gz) === AIR;
+        (() => {
+          const g = world.getVoxel(gx, gy, gz);
+          return g === AIR || g === WATER;
+        })();
       if (placeableCell) selectionViz.showGhost(gx, gy, gz, getMaterial(selectedMaterial).color);
       else selectionViz.hideGhost();
     } else {
@@ -719,7 +737,9 @@ const creatorViz = new CreatorViz(engine.scene);
           (player.onGround ? '' : ' · air'),
         `mat ${selected.name} · target ${target} · undo ${history.depth} · ` +
           `seed ${terrain.seed} · ${savedText} · snd ${sfx.enabled ? 'on' : 'off'} · ` +
-          `debris ${debris.activeCount}/${debris.capacity}`,
+          `debris ${debris.activeCount}/${debris.capacity}` +
+          (player.inWater ? ' · swimming' : '') +
+          (fluid.activeCount > 0 ? ` · water ${fluid.activeCount}` : ''),
       ];
       if (creator.enabled) {
         const b = creator.brush;
@@ -740,7 +760,16 @@ const creatorViz = new CreatorViz(engine.scene);
         lines.push('creator off (C)');
       }
       if (creator.inspector) {
-        lines.push(formatInspection(hit ? inspectVoxel(voxelQuery, hit.voxel.x, hit.voxel.y, hit.voxel.z) : undefined));
+        const inspection = hit
+          ? inspectVoxel(
+              voxelQuery,
+              hit.voxel.x,
+              hit.voxel.y,
+              hit.voxel.z,
+              fluid.levelAt(hit.voxel.x, hit.voxel.y, hit.voxel.z),
+            )
+          : undefined;
+        lines.push(formatInspection(inspection));
       }
       hud.textContent = lines.join('\n');
       fpsFrames = 0;
@@ -756,6 +785,7 @@ const creatorViz = new CreatorViz(engine.scene);
       world,
       creator,
       history,
+      fluid,
       isLocked: () => input.isLocked,
     };
   }

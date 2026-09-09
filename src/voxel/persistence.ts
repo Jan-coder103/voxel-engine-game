@@ -8,16 +8,21 @@ import type { World } from './world';
  * material table snapshot, per-chunk edited voxels). This keeps saves
  * small and lets the same file restore a world of any streamed size.
  *
+ * Since v2 the save also carries the fluid sim's non-default water levels
+ * (Phase 9): cells listed as [voxelIndex, level] hold flowing water of
+ * that amount; a WATER material cell absent from the list is a source
+ * (level 255); anything else is dry. Terrain lakes need no entries.
+ *
  * Format versioning: `migrateWorld` walks a payload forward through a
- * chain of migrators, one step per version. v1 is the first format; the
- * chain exists so future formats migrate instead of breaking old saves.
+ * chain of migrators, one step per version. The chain exists so future
+ * formats migrate instead of breaking old saves.
  */
 
-export const WORLD_FORMAT_VERSION = 1;
+export const WORLD_FORMAT_VERSION = 2;
 
-/** Version 1 payload. `edits`: chunkKey → [voxelIndex, materialId][]. */
+/** Version 1 payload (first format). `edits`: chunkKey → [voxelIndex, materialId][]. */
 export interface SerializedWorldV1 {
-  version: typeof WORLD_FORMAT_VERSION;
+  version: 1;
   /** Save time, milliseconds since epoch (informational). */
   savedAt: number;
   seed: number;
@@ -27,7 +32,16 @@ export interface SerializedWorldV1 {
   edits: Record<string, [number, number][]>;
 }
 
-export type SerializedWorld = SerializedWorldV1;
+/**
+ * Version 2 payload: adds the fluid level map. Levels are sparse — only
+ * flowing water (1–254) is listed, so an empty world costs nothing.
+ */
+export interface SerializedWorldV2 extends Omit<SerializedWorldV1, 'version'> {
+  version: 2;
+  waterLevels: Record<string, [number, number][]>;
+}
+
+export type SerializedWorld = SerializedWorldV2;
 
 interface AnyVersioned {
   version?: unknown;
@@ -41,7 +55,9 @@ type Migration = (payload: Record<string, unknown>) => Record<string, unknown>;
 
 /** Migrators keyed by the version they upgrade FROM. */
 const MIGRATIONS: Record<number, Migration> = {
-  // v1 is the initial format: nothing to migrate from below.
+  // v1 → v2: v1 has no fluid state; every water cell is a source (the
+  // level map starts empty), which matches how v1 worlds were made.
+  1: (payload) => ({ ...payload, version: 2, waterLevels: {} }),
 };
 
 /**
@@ -68,7 +84,7 @@ export function migrateWorld(parsed: unknown): SerializedWorld {
       `Save version ${version} is newer than this build supports (${WORLD_FORMAT_VERSION})`,
     );
   }
-  return validateV1(payload);
+  return validateV2(payload);
 }
 
 function payloadVersion(payload: AnyVersioned): number {
@@ -78,8 +94,8 @@ function payloadVersion(payload: AnyVersioned): number {
   return payload.version;
 }
 
-/** Structural validation for the v1 payload (post-migration). */
-function validateV1(payload: Record<string, unknown>): SerializedWorldV1 {
+/** Structural validation for the v2 payload (post-migration). */
+function validateV2(payload: Record<string, unknown>): SerializedWorldV2 {
   if (payload.version !== WORLD_FORMAT_VERSION) {
     throw new Error(`Expected save version ${WORLD_FORMAT_VERSION}, got ${payload.version}`);
   }
@@ -114,18 +130,43 @@ function validateV1(payload: Record<string, unknown>): SerializedWorldV1 {
       }
     }
   }
-  return payload as unknown as SerializedWorldV1;
+  const waterLevels = payload.waterLevels as Record<string, unknown> | undefined;
+  if (!waterLevels || typeof waterLevels !== 'object') {
+    throw new Error('Save is missing "waterLevels"');
+  }
+  for (const [key, entries] of Object.entries(waterLevels)) {
+    if (!Array.isArray(entries)) throw new Error(`Save water levels for chunk ${key} are not an array`);
+    for (const entry of entries) {
+      if (
+        !Array.isArray(entry) ||
+        entry.length !== 2 ||
+        !Number.isInteger(entry[0]) ||
+        !Number.isInteger(entry[1]) ||
+        entry[1] < 1 ||
+        entry[1] > 254
+      ) {
+        throw new Error(`Save water levels for chunk ${key} contain a malformed entry`);
+      }
+    }
+  }
+  return payload as unknown as SerializedWorldV2;
 }
 
-/** Build a save payload from the live world. */
-export function serializeWorld(world: World, terrain: TerrainParams, savedAt = Date.now()): SerializedWorldV1 {
+/** Build a save payload from the live world (and its fluid state). */
+export function serializeWorld(
+  world: World,
+  terrain: TerrainParams,
+  savedAt = Date.now(),
+  waterLevels: Record<string, [number, number][]> = {},
+): SerializedWorldV2 {
   return {
     version: WORLD_FORMAT_VERSION,
     savedAt,
     seed: terrain.seed,
     terrain: { ...terrain },
-    materials: JSON.parse(serializeMaterials()) as SerializedWorldV1['materials'],
+    materials: JSON.parse(serializeMaterials()) as SerializedWorldV2['materials'],
     edits: world.exportEdits(),
+    waterLevels,
   };
 }
 

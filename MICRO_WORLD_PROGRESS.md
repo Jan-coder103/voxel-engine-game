@@ -31,19 +31,19 @@
 
 ## Overall Phase
 
-**Current phase:** Phases 7–8 complete — next: Phase 9 (Water)
+**Current phase:** Phase 9 (Water) — implementation ~90% done, mid-session handoff (see `HANDOFF.md` for the detailed pickup map)
 
-**Current milestone:** Milestones 1–5 met + the Phase 8 gate verified (destructible structures: pillar-roof collapse, capped debris stress test)
+**Current milestone:** Milestones 1–6 met (through destruction). Milestone 7 (water flows) functionally implemented, verification/docs pending.
 
-**Overall completion:** ~32% (Phases 0–8 done; Month-1 "engine" scope from §135 effectively complete: walkable, editable, saveable, sculptable, destructible microvoxel world)
+**Overall completion:** ~36% (Phases 0–8 done; Phase 9 code complete and green)
 
-**Last completed task:** Session 004 — Phase 7 creator mode (brushes, selection, clipboard, prefabs, inspector) and Phase 8 destruction (damage fields, support collapse, pooled debris/dust, procedural sound, event bus), 205 tests green, four commits, headless browser verification of the gate + core flows
+**Last completed task:** Session 005 (in progress) — Phase 9 water: pure `FluidSim` (levels 0–255, sources-by-default, gravity + equalization, exact mass conservation, sleep/wake, budgeted ticks, chunk-frontier wake), flow-height water rendering (`waterDrop` attribute, greedy-mesher merge signature), player swimming/buoyancy/climb-out, water interactions (brush place/displace, explosion vaporization, water as placeable material), save format v2 with fluid levels + v1 migration. 239 tests green (22 files). **Nothing committed yet.**
 
-**Current task:** None — clean handoff point
+**Current task:** Finish Phase 9: run `benchmarks/fluid.bench.ts` + record baselines, re-run typecheck/lint/build (last edits came after the last typecheck), headless browser verification (water spread + swim + lake render via `.verify/run.mjs`), update docs (architecture, performance, known-issues, README, CHANGELOG) + this file's Phase 9 checklist, commit.
 
-**Blocked by:** Nothing
+**Blocked by:** Nothing (user paused the session for the night mid-verification)
 
-**Next recommended action:** Start Phase 9 (Water): cellular fluid sim in `src/voxel/fluid.ts` (pure, volume-per-cell 0–255, gravity + horizontal equalization first) with mass-conservation tests, then water rendering (flowing vs source levels) and player buoyancy. The known-issues list carries the integration targets (water targetable by raycast, brush/explosion interaction).
+**Next recommended action:** Follow `HANDOFF.md` (Session 005 section) top to bottom — it lists exact remaining steps, the checklist mapping, and the known sharp edges (undo-turns-flow-into-sources, no pressure/up-flow, LOD1 full cubes) to document.
 
 ---
 

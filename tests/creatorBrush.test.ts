@@ -202,21 +202,26 @@ describe('brushEdits tools', () => {
     expect(edits.length).toBeGreaterThan(0);
   });
 
-  it('treats water as owned by Phase 9: not placed into, not painted, but deletable', () => {
+  it('water: placeable as a material, displaced by place, skipped by paint, deletable', () => {
     const world = emptyWorld();
     world.setVoxel(0, 5, 0, WATER);
-    const paint = brushEdits(
-      baseBrush({ shape: 'box', size: 2, tool: 'paint', material: SAND }),
-      C,
-      (x, y, z) => world.getVoxel(x, y, z),
-    );
-    expect(paint).toHaveLength(0);
-    const del = brushEdits(
-      baseBrush({ shape: 'box', size: 2, tool: 'delete' }),
-      C,
-      (x, y, z) => world.getVoxel(x, y, z),
-    );
-    expect(del).toEqual([{ x: 0, y: 5, z: 0, material: AIR }]);
+    const query = (x: number, y: number, z: number) => world.getVoxel(x, y, z);
+    // Paint never recolors water (the fluid owns those cells).
+    expect(
+      brushEdits(baseBrush({ shape: 'box', size: 2, tool: 'paint', material: SAND }), C, query),
+    ).toHaveLength(0);
+    // Placing stone into water displaces it.
+    expect(
+      brushEdits(baseBrush({ shape: 'box', size: 2, tool: 'place', material: STONE }), C, query),
+    ).toContainEqual({ x: 0, y: 5, z: 0, material: STONE });
+    // Delete removes water.
+    expect(brushEdits(baseBrush({ shape: 'box', size: 2, tool: 'delete' }), C, query)).toEqual([
+      { x: 0, y: 5, z: 0, material: AIR },
+    ]);
+    // Water itself is a placeable material (creates fluid sources).
+    expect(
+      brushEdits(baseBrush({ shape: 'box', size: 2, tool: 'place', material: WATER }), C, () => AIR),
+    ).toContainEqual({ x: 0, y: 5, z: 0, material: WATER });
   });
 });
 

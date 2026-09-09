@@ -202,3 +202,88 @@ describe('meshVolumeGreedy — equivalence with the naive baseline', () => {
     }
   });
 });
+
+describe('meshVolumeGreedy — water flow height (Phase 9)', () => {
+  it('sinks surfaced water top faces by (255 − level)/255 and keeps submerged full', () => {
+    const volume = new VoxelVolume(4);
+    // A full column (submerged except the top) plus a half-full puddle.
+    for (let y = 0; y < 3; y++) for (let z = 0; z < 2; z++) for (let x = 0; x < 2; x++) volume.set(x, y, z, WATER);
+    volume.set(2, 0, 0, WATER);
+    const level = (x: number, y: number, z: number) => (y === 0 && x === 2 ? 128 : 255);
+    const mesh = meshVolumeGreedy(volume, localQuery(volume), level);
+    expect(mesh.water.waterDrop).toBeDefined();
+
+    // Top face of the 2×2 column: full cells (level 255) → drop 0.
+    // The puddle at (2,0,0): level 128 → drop (255-128)/255.
+    const expectedPuddleDrop = (255 - 128) / 255;
+    const topFaces: number[][] = [];
+    for (let q = 0; q < mesh.water.quadCount; q++) {
+      const v0 = q * 4;
+      const ny = mesh.water.normals[v0 * 3 + 1];
+      const dir = mesh.water.normals[v0 * 3 + 1];
+      const y = mesh.water.positions[v0 * 3 + 1];
+      if (ny === 1 && dir === 1) topFaces.push([q, y]);
+    }
+    // Two +Y quads: the column top (drop 0 everywhere) and the puddle top.
+    expect(topFaces.length).toBeGreaterThanOrEqual(2);
+    const dropsAt = (q: number) => {
+      const drops: number[] = [];
+      for (let i = 0; i < 4; i++) drops.push(mesh.water.waterDrop![q * 4 + i]);
+      return drops;
+    };
+    const columnTop = topFaces.find(([, y]) => y === 3)!;
+    const puddleTop = topFaces.find(([, y]) => y === 1)!;
+    expect(dropsAt(columnTop[0])).toEqual([0, 0, 0, 0]);
+    for (const d of dropsAt(puddleTop[0])) expect(Math.abs(d - expectedPuddleDrop)).toBeLessThan(1e-6);
+
+    // Submerged cells (water above): no drop on their side faces either —
+    // the column interior emits nothing; only the surface matters.
+    const anyDrop = Array.from(mesh.water.waterDrop!).some((d) => d > 0);
+    expect(anyDrop).toBe(true); // the puddle contributed drops
+  });
+
+  it('water levels never change the emitted face set (equivalence holds)', () => {
+    const volume = new VoxelVolume(6);
+    const rng = mulberry32(4242);
+    for (let z = 0; z < 6; z++)
+      for (let y = 0; y < 6; y++)
+        for (let x = 0; x < 6; x++) {
+          const r = rng();
+          volume.set(x, y, z, r < 0.3 ? STONE : r < 0.55 ? WATER : AIR);
+        }
+    const level = (x: number, y: number, z: number) =>
+      Math.floor(hashish(x, y, z) * 255);
+    const withLevels = meshVolumeGreedy(volume, localQuery(volume), level);
+    const without = meshVolumeGreedy(volume, localQuery(volume));
+    expectSameFaces(withLevels, without, 'levels do not change faces');
+  });
+
+  it('side faces of a surfaced cell drop only their top edge', () => {
+    const volume = new VoxelVolume(2);
+    volume.set(0, 0, 0, WATER); // lone half-full cell on bedrock-less air
+    volume.set(0, 0, 1, STONE); // support so only +X / -X / +Y faces emit against air
+    const mesh = meshVolumeGreedy(volume, localQuery(volume), () => 51); // drop = 0.8
+    for (let q = 0; q < mesh.water.quadCount; q++) {
+      const drops = [0, 1, 2, 3].map((i) => mesh.water.waterDrop![q * 4 + i]);
+      const ys = [0, 1, 2, 3].map((i) => mesh.water.positions[(q * 4 + i) * 3 + 1]);
+      const ny = mesh.water.normals[q * 4 * 3 + 1];
+      const topY = Math.max(...ys);
+      if (ny === -1) {
+        // Undersides stay square (the drop only sinks top edges).
+        expect(drops).toEqual([0, 0, 0, 0]);
+        continue;
+      }
+      for (let i = 0; i < 4; i++) {
+        if (ys[i] === topY) expect(drops[i]).toBeCloseTo(0.8, 6);
+        else expect(drops[i]).toBe(0);
+      }
+    }
+  });
+});
+
+/** Cheap deterministic stand-in level function for equivalence testing. */
+function hashish(x: number, y: number, z: number): number {
+  let h = (Math.imul(x, 374761393) + Math.imul(y, 2246822519) + Math.imul(z, 668265263)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
