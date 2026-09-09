@@ -5,11 +5,10 @@ milestone goes here before it goes to the backlog.
 
 ## Engine / gameplay
 
-- **Naive mesher, one draw call per chunk pass.** ~226 meshes at render
-  radius 6 run fine; greedy meshing + cache improvements are Phase 6.
 - **Water is a placeholder.** It renders translucently but has no
   collision or buoyancy — players walk on lake beds. Swimming/fluid
-  simulation arrives in Phase 9.
+  simulation arrives in Phase 9. Water is also not targetable by the
+  edit raycast (you edit through it, which is intended for now).
 - **Void fall.** Outrunning stream generation (or falling off
   steep unloaded edges) drops the player into the void; respawn at
   y < −32 recovers. A "freeze physics in unloaded chunks" guard is a
@@ -24,9 +23,34 @@ milestone goes here before it goes to the backlog.
 - **No step-up assist.** One-voxel ledges require jumping (by design —
   jump apex is tuned to ~1.08 voxel). Automatic step climb is a §35
   feature.
-- **No interaction raycast yet.** Lands with Phase 5 editing, its first
-  real consumer.
 - **No sprint/crouch.** Listed for the full controller (§35).
+- **Bedrock floor is protected.** The y = 0 layer cannot be removed or
+  painted (prevents accidental world-floor holes); everything above is
+  fair game.
+- **Editing is single-voxel.** Brushes/box tools are Phase 7; undo
+  groups per click, not per stroke.
+
+## Storage / meshing / LOD
+
+- **Packed reads are ~4× dense.** Palette + bit unpacking costs reads
+  (~0.25 ms per 4096 sequential reads vs ~0.06 ms dense) but meshing
+  stays mesh-bound (greedy terrain chunk: 2.46 ms through packed vs
+  3.15 ms naive through dense). Fine at the 3-chunks/frame budget;
+  revisit if profiling says otherwise. See `docs/voxel-storage.md`.
+- **LOD1 erodes up to one voxel.** The downsample's air-wins-ties rule
+  guarantees LOD never adds terrain (the inflation bug from playtest),
+  at the cost of shaving odd-height surface blocks. Correct-by-design;
+  visible only as slightly lower distant silhouettes.
+- **LOD1 seam culling is approximate.** The LOD boundary query reads
+  one representative voxel of each neighboring 2³ block, so a rare
+  culled face can leave a pinhole at chunk seams in LOD1 — far away,
+  cosmetic, self-heals when the chunk returns to LOD0.
+- **No worker meshing / transferable buffers.** Phase 6 checklist item
+  deferred: greedy meshing is ~2.5 ms/chunk and the frame budget
+  absorbs it; revisit when chunk size or radius grows.
+- **Bundle size.** The three.js chunk exceeds Vite's 500 kB warning
+  (~545 kB minified, ~140 kB gzipped). Harmless for a local demo;
+  revisit if it ever matters (code-splitting or a WebGPU-only path).
 
 ## Rendering
 
@@ -36,9 +60,6 @@ milestone goes here before it goes to the backlog.
 - **Fog band.** Fog is tuned to the render radius; terrain silhouettes
   still pop in slightly at the edge when chunks finish streaming.
   Acceptable until meshing is fast enough for a bigger radius.
-- **Bundle size.** The three.js chunk exceeds Vite's 500 kB warning
-  (~526 kB minified, ~133 kB gzipped). Harmless for a local demo;
-  revisit if it ever matters (code-splitting or a WebGPU-only path).
 
 ## Platform
 
@@ -48,3 +69,8 @@ milestone goes here before it goes to the backlog.
 - **Pointer lock requires a user gesture** and can be denied by browser
   hardening (e.g. rapid re-lock after Esc). The overlay click handles
   the normal case.
+- **Autosave saves the edit journal + seed only.** Terrain regeneration
+  is part of the save contract; a future terrain-parameter change would
+  alter regenerated ground under old saves (the material table and edits
+  still load — the schema carries terrain params to make drift
+  detectable).

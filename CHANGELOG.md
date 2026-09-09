@@ -4,6 +4,39 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.4.0] — 2026-09-09 — Phase 6 (Microvoxels)
+
+### Added
+
+- Palette-compressed chunk storage (`PackedVolume`): per-volume material
+  palette + bit-packed indices (1/2/4/8 bits, auto-widening) with an
+  occupancy bitset for O(1) air/empty checks. ~5.3× smaller than dense
+  on terrain (1536 B vs 8192 B per chunk); both satisfy the new shared
+  `VoxelData` interface. Tradeoff study in `docs/voxel-storage.md`.
+- Greedy mesher (`meshVolumeGreedy`): coplanar same-material faces
+  merge into maximal rectangles — proven face-set-equivalent to the
+  naive baseline by randomized + terrain + cross-chunk equivalence
+  tests, with per-quad winding checks. Terrain chunk: 1506 → 185 quads;
+  whole view ~82.5k → ~9k quads.
+- Chunk LOD: `downsampleVolume` (majority material, air-wins-ties) +
+  distance-based level selection with hysteresis; LOD1 meshes rebuild
+  from the downsampled volume and scale 2×. 88 of 226 chunks render at
+  LOD1 at radius 6.
+- Per-voxel shader variation now derives the voxel cell from the
+  fragment's world position, staying per-voxel on merged greedy quads
+  (replaces the removed `voxelOrigins` attribute).
+- Material painting: **F** recolors the targeted voxel in place.
+- Benchmarks: naive vs greedy meshing (all scenes), dense vs packed
+  storage, terrain chunk quad counts; baselines in
+  `docs/performance.md`.
+- 30 new tests (147 total).
+
+### Fixed
+
+- LOD1 surfaces sat 1–2 voxels above the full-resolution mesh (found in
+  browser playtesting): the downsample's majority rule now counts air
+  and air wins ties, so LOD can only erode, never inflate terrain.
+
 ## [0.3.0] — 2026-09-09 — Phase 5 (Editing)
 
 ### Added

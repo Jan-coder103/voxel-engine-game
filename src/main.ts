@@ -244,6 +244,14 @@ function main(): void {
       if (slot) selectMaterial(slot.id);
       return;
     }
+    if (code === 'KeyF') {
+      // Paint: recolor the targeted voxel in place (bedrock protected).
+      const hit = targetHit();
+      if (hit && hit.voxel.y > BEDROCK_Y) {
+        edit([{ x: hit.voxel.x, y: hit.voxel.y, z: hit.voxel.z, material: selectedMaterial }], 'paint');
+      }
+      return;
+    }
     const ctrl = input.isDown('ControlLeft') || input.isDown('ControlRight');
     const shift = input.isDown('ShiftLeft') || input.isDown('ShiftRight');
     if (ctrl && code === 'KeyZ') {
@@ -337,7 +345,7 @@ function main(): void {
         : '—';
       const savedText = lastSaveAt === undefined ? 'unsaved' : `saved ${saveAge(lastSaveAt)}`;
       hud.textContent =
-        `fps ${fps} · chunks ${s.meshed} (q ${s.queued}) · ` +
+        `fps ${fps} · chunks ${s.meshed} (q ${s.queued}, lod1 ${s.lod1}) · ` +
         `${(s.quads / 1000).toFixed(1)}k quads · ` +
         `pos ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}` +
         (player.onGround ? '' : ' · air') +

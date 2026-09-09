@@ -1,6 +1,31 @@
 import { AIR, type VoxelMaterialID } from './materials';
 
 /**
+ * The storage-agnostic voxel surface: dense `VoxelVolume` and the
+ * palette-compressed `PackedVolume` both satisfy it, so the world,
+ * mesher, and collision code never care which one backs a chunk.
+ */
+export interface VoxelData {
+  readonly size: number;
+  readonly voxelCount: number;
+  /** Flat index for in-bounds local coordinates. */
+  index(x: number, y: number, z: number): number;
+  inBounds(x: number, y: number, z: number): boolean;
+  /** Read a voxel. Throws if out of bounds — use `getOrAir` at world edges. */
+  get(x: number, y: number, z: number): VoxelMaterialID;
+  /** Read a voxel, treating out-of-bounds as air. */
+  getOrAir(x: number, y: number, z: number): VoxelMaterialID;
+  /** Write a voxel. Returns false (and writes nothing) if out of bounds. */
+  set(x: number, y: number, z: number, material: VoxelMaterialID): boolean;
+  /** Read by flat index (`index(x, y, z)` layout). Throws on bad index. */
+  getByIndex(index: number): VoxelMaterialID;
+  /** Write by flat index. Returns false (and writes nothing) on bad index. */
+  setByIndex(index: number, material: VoxelMaterialID): boolean;
+  /** Fill the whole volume with one material. */
+  fill(material: VoxelMaterialID): void;
+}
+
+/**
  * Dense cubic voxel volume backed by a flat Uint16Array.
  *
  * Index layout is y-major: `index = x + z * size + y * size * size`, so a
@@ -13,7 +38,7 @@ import { AIR, type VoxelMaterialID } from './materials';
  *   mesher culling, collision) so callers need no special cases.
  * - `set` reports out-of-bounds writes by returning `false`.
  */
-export class VoxelVolume {
+export class VoxelVolume implements VoxelData {
   readonly size: number;
   private readonly data: Uint16Array;
 

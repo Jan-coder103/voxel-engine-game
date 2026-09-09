@@ -1,15 +1,17 @@
 import { type ChunkCoordinate, chunkKeyCoord } from './coordinates';
 import { CHUNK_SIZE } from './coordinates';
-import { VoxelVolume } from './voxelVolume';
+import { PackedVolume } from './packedVolume';
+import type { VoxelData } from './voxelVolume';
 
 /**
  * One chunk: a 16³ slice of the world plus its mesh-related state.
- * Data lives in `volume`; `dirty` marks that voxel data changed since
- * the last mesh build (set by edits and by generation of neighbors —
- * boundary faces need remeshing when a neighbor appears).
+ * Data lives in a palette-compressed volume (Phase 6); `dirty` marks that
+ * voxel data changed since the last mesh build (set by edits and by
+ * generation of neighbors — boundary faces need remeshing when a
+ * neighbor appears).
  */
 export class Chunk {
-  readonly volume = new VoxelVolume(CHUNK_SIZE);
+  readonly volume: VoxelData = new PackedVolume(CHUNK_SIZE);
   dirty = true;
 
   constructor(readonly coord: ChunkCoordinate) {}

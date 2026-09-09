@@ -2,11 +2,15 @@ import * as THREE from 'three';
 import { MATERIALS } from '../voxel/materials';
 
 /**
- * The voxel material shader (Phase 4): replaces the baked vertex-color
- * Lambert path. Per-vertex `materialId` indexes a palette texture (one
- * texel per registered material); `voxelOrigin` drives a per-voxel
- * brightness variation; lighting (hemisphere + one sun) and fog are
+ * The voxel material shader (Phase 4, variation reworked in Phase 6):
+ * per-vertex `materialId` indexes a palette texture (one texel per
+ * registered material); lighting (hemisphere + one sun) and fog are
  * computed in-shader, so no scene lights or scene.fog are needed.
+ *
+ * Per-voxel brightness variation is derived from the fragment's world
+ * position (`floor(worldPos − normal/2)` recovers the voxel cell), which
+ * stays correct on the greedy mesher's merged quads — a per-vertex
+ * voxel-origin attribute would smear across them.
  *
  * Water is the same shader with transparency, no depth write, and both
  * faces visible (swimming under the surface sees it).
@@ -26,18 +30,18 @@ export interface VoxelMaterialOptions {
 
 const VERT = /* glsl */ `
 attribute float materialId;
-attribute vec3 voxelOrigin;
 
 varying vec3 vNormal;
-varying vec3 vVoxelOrigin;
+varying vec3 vWorldPos;
 varying float vMaterialId;
 varying float vFogDepth;
 
 void main() {
   vNormal = normal;
-  vVoxelOrigin = voxelOrigin;
   vMaterialId = materialId;
-  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  vWorldPos = world.xyz;
+  vec4 mv = viewMatrix * world;
   vFogDepth = -mv.z;
   gl_Position = projectionMatrix * mv;
 }
@@ -57,7 +61,7 @@ uniform float uOpacity;
 uniform float uVariation;
 
 varying vec3 vNormal;
-varying vec3 vVoxelOrigin;
+varying vec3 vWorldPos;
 varying float vMaterialId;
 varying float vFogDepth;
 
@@ -67,10 +71,14 @@ float hashVoxel(vec3 p) {
 
 void main() {
   vec3 albedo = texture2D(uPalette, vec2((vMaterialId + 0.5) / uPaletteSize, 0.5)).rgb;
-  float variation = hashVoxel(floor(vVoxelOrigin + 0.5)) - 0.5;
+  // Recovers the integer voxel cell from the fragment's world position:
+  // a face lies on the cell plane offset by normal/2 along its axis, and
+  // the in-plane coordinates floor back into the same cell everywhere
+  // except the outermost edge pixels.
+  vec3 n = normalize(vNormal);
+  float variation = hashVoxel(floor(vWorldPos - n * 0.5)) - 0.5;
   albedo *= 1.0 + 2.0 * uVariation * variation;
 
-  vec3 n = normalize(vNormal);
   float sun = max(dot(n, uSunDir), 0.0);
   vec3 ambient = mix(uGroundColor, uSkyColor, n.y * 0.5 + 0.5);
   vec3 lit = albedo * (ambient + uSunColor * sun);

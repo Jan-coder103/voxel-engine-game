@@ -4,10 +4,12 @@ import type { MeshData } from '../voxel/mesher';
 /**
  * Mesher output → three.js BufferGeometry. This is the one place where
  * mesh data meets three.js; the mesher itself stays renderer-agnostic.
- * Color/material lookups happen in the voxel shader (voxelMaterial.ts).
+ * `voxelSize` bakes LOD scaling into positions (LOD1 = 2 so one mesh
+ * voxel spans 2 world voxels). Color/material lookups happen in the
+ * voxel shader (voxelMaterial.ts).
  */
 
-export function buildVoxelGeometry(mesh: MeshData): THREE.BufferGeometry {
+export function buildVoxelGeometry(mesh: MeshData, voxelSize = 1): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
 
   geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
@@ -16,7 +18,7 @@ export function buildVoxelGeometry(mesh: MeshData): THREE.BufferGeometry {
     'materialId',
     new THREE.BufferAttribute(new Float32Array(mesh.materialIds), 1),
   );
-  geometry.setAttribute('voxelOrigin', new THREE.BufferAttribute(mesh.voxelOrigins, 3));
   geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+  if (voxelSize !== 1) geometry.scale(voxelSize, voxelSize, voxelSize);
   return geometry;
 }

@@ -111,16 +111,16 @@ describe('meshVolume', () => {
     expect(culled.opaque.quadCount).toBe(5); // +X face now hidden
   });
 
-  it('emits voxelOrigins for shader variation', () => {
+  it('aligns all per-vertex attributes', () => {
     const volume = new VoxelVolume(4);
     volume.set(2, 1, 1, STONE);
     const mesh = meshVolume(volume, localQuery(volume));
-    expect(mesh.opaque.voxelOrigins.length).toBe(mesh.opaque.positions.length);
-    const origins = mesh.opaque.voxelOrigins;
-    for (let v = 0; v < origins.length / 3; v++) {
-      expect(origins[v * 3]).toBe(2);
-      expect(origins[v * 3 + 1]).toBe(1);
-      expect(origins[v * 3 + 2]).toBe(1);
+    const vertices = mesh.opaque.positions.length / 3;
+    expect(mesh.opaque.normals.length).toBe(mesh.opaque.positions.length);
+    expect(mesh.opaque.materialIds.length).toBe(vertices);
+    expect(mesh.opaque.indices.length).toBe(mesh.opaque.quadCount * 6);
+    for (let v = 0; v < vertices; v++) {
+      expect(mesh.opaque.materialIds[v]).toBe(STONE);
     }
   });
 

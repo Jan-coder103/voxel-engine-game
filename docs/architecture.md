@@ -1,6 +1,6 @@
 # Architecture
 
-Scope: what exists now (Phase 0–1) plus the boundaries already fixed for
+Scope: what exists now (Phases 0–6) plus the boundaries already fixed for
 later phases. The full decision log lives in
 `MICRO_WORLD_PROGRESS.md` (ADR-001…005); this document explains the
 practical consequences for code layout.
@@ -26,8 +26,11 @@ produces plain data (`FrameInput`) for the pure controller.
 
 ## World model
 
-- `VoxelVolume` — dense `Uint16Array`, cubic, y-major index layout
-  (`x + z·size + y·size²`). 0 is air; fresh volumes are all air.
+- `VoxelData` is the storage-agnostic surface (`size`, `get`/`getOrAir`/
+  `set`, flat-index access, `fill`). Two implementations: `VoxelVolume`
+  (dense `Uint16Array`, the correctness baseline) and `PackedVolume`
+  (palette compression + occupancy bitset, production chunk storage —
+  see `docs/voxel-storage.md`). 0 is air; fresh volumes are all air.
   Bounds policy: `get` throws (programmer error), `getOrAir` treats
   outside as air (world-facing: meshing, collision), `set` returns
   `false` on out-of-bounds.
@@ -35,28 +38,63 @@ produces plain data (`FrameInput`) for the pure controller.
   layers): `worldToChunk` uses floor division so negative world
   coordinates land in negative chunks; `worldToLocal` always returns
   `[0, 16)`. Round-trip property is unit-tested.
-- `Chunk` wraps one 16³ volume with `coord`, `origin`, and a `dirty`
-  flag (data changed since last mesh).
-- `World` is the chunk map: `ensureChunk` generates once and marks
-  existing neighbors dirty (their boundary faces were built against
-  air), `setVoxel` marks the owning chunk plus any boundary neighbors
-  dirty, `pruneBeyond` drops data by XZ distance. Reads in unloaded
-  chunks are air; writes to unloaded chunks fail.
+- `Chunk` wraps one 16³ `PackedVolume` with `coord`, `origin`, and a
+  `dirty` flag (data changed since last mesh).
+- `World` is the chunk map: `ensureChunk` generates once, replays any
+  journaled edits, and marks existing neighbors dirty (their boundary
+  faces were built against air); `setVoxel` marks the owning chunk plus
+  any boundary neighbors dirty and journals the edit; `pruneBeyond`
+  drops data by XZ distance. Reads in unloaded chunks are air; writes
+  to unloaded chunks fail.
+- **Edit journal**: `setVoxel` records (local voxel index → material)
+  per chunk. On regeneration the journal replays over the generator, so
+  player edits survive chunk unload/prune deterministically. The
+  journal is the persistence unit (`exportEdits`/`loadEdits`).
+
+## Editing and persistence (Phase 5)
+
+- `raycastVoxels` (pure DDA, Amanatides & Woo): walks the grid from a
+  ray, reports the hit voxel, entry-face normal, and distance. The
+  starting-cell hit has a zero normal (no entered face); editing skips
+  placement there. Water is not targetable.
+- `applyEdits` groups cell changes into one `EditCommand` (target
+  values + captured previous values, no-ops and failed cells skipped);
+  `EditHistory` is the standard undo/redo stack pair capped at 128
+  commands — pushing clears the redo branch. All world mutation goes
+  through these, so remeshing, journaling, and autosave stay consistent.
+- `src/voxel/persistence.ts`: the save unit is (schema version, seed,
+  terrain params, material-table snapshot, edit journal). Saves are
+  small because terrain regenerates from the seed. `migrateWorld` walks
+  payloads forward through a per-version migrator chain and rejects
+  unknown/newer versions; the embedded material table is validated
+  against the live registry on load. `SaveStore` abstracts storage
+  (memory + localStorage backends); `AutosavePolicy` is a pure
+  dirty-gated interval timer.
+- Boot: an autosave restores unless `?seed=` names a different world;
+  the tab hides → immediate save (crash-recovery window).
 
 ## Chunk meshing and streaming
 
-- `meshVolume(volume, query)` culls against a voxel query that may leave
-  `[0, size)`; chunk meshing passes one routed through `World`, so faces
-  across chunk borders cull correctly. Emission rules by material class:
-  opaque faces emit against non-opaque neighbors (air or water); water
-  emits only against air. Output splits into opaque/water `MeshData`
-  passes with per-vertex `voxelOrigins` for shader variation.
+- Production meshing is `meshVolumeGreedy`: the 0fps per-axis sweep —
+  a face mask per slice boundary (same emission rules as the naive
+  baseline: opaque emits against non-opaque, water only against air,
+  and only in-volume cells may emit), greedily merged into maximal
+  same-material rectangles. Unit-tested equivalent to `meshVolume`
+  (naive, kept as baseline) by comparing the full unit-face multiset on
+  random volumes, terrain chunks, and cross-chunk worlds; winding is
+  checked per quad.
+- LOD: `downsampleVolume` builds a half-resolution volume per chunk
+  (majority material per 2³ block, **air wins ties** so LOD1 never
+  inflates surfaces); the mesh is built with the same greedy mesher and
+  scaled 2× at geometry level. `desiredLod` picks the level from XZ
+  chunk distance with a hysteresis band (switch away past 4.5, back
+  inside 3.5) so boundary chunks cannot flicker.
 - `ChunkMeshManager` (render side) owns one mesh per chunk pass:
   desired set from pure streaming math (`desiredChunkCoords`, circular
   XZ radius, all Y layers), nearest-first queue with a camera-direction
-  tie-break, a per-frame mesh budget, dirty remeshes before new chunks,
-  and geometry disposal one ring outside the render radius (data is
-  pruned two rings out).
+  tie-break, a per-frame mesh budget (dirty remeshes → LOD switches →
+  new chunks), and geometry disposal one ring outside the render radius
+  (data is pruned two rings out).
 
 ## Terrain generation
 
@@ -81,16 +119,16 @@ produces plain data (`FrameInput`) for the pure controller.
 
 ## Meshing pipeline
 
-`meshVolume(volume) → MeshData` (positions/normals/materialIds/indices as
-typed arrays) → `buildVoxelGeometry()` in `src/render/` → one
-`THREE.Mesh` per volume. Culling rule: a face is emitted iff the
-neighboring cell (via `getOrAir`) is air, which also handles the volume
-boundary. The naive mesher is intentionally kept as the correctness
-baseline; greedy meshing arrives with Phase 6 and must match it on
-visual output.
+`meshVolumeGreedy(volume) → ChunkMesh` (positions/normals/materialIds/
+indices as typed arrays) → `buildVoxelGeometry()` in `src/render/` → one
+`THREE.Mesh` per volume (or per pass). The naive `meshVolume` is
+intentionally kept as the correctness baseline; the greedy mesher must
+match it on the unit-face multiset, and equivalence tests pin that for
+random volumes, terrain chunks, and cross-chunk worlds.
 
-Winding: quads are CCW from outside (three.js front faces), verified by a
-unit test comparing each quad's cross-product normal to its stored normal.
+Winding: quads are CCW from outside (three.js front faces), verified by
+a unit test comparing each quad's cross-product normal to its stored
+normal — for the greedy mesher on random mixed volumes, both facings.
 
 ## Player physics
 
@@ -113,26 +151,36 @@ own lighting and fog, so the scene has no lights and no scene.fog;
 
 `createVoxelMaterials()` builds the shader pair (opaque + water):
 `materialId` attributes index a palette `DataTexture` (one texel per
-registered material, regenerated only if the registry changes shape),
-`voxelOrigin` attributes hash into a subtle per-voxel brightness
-variation, and fog blends to the sky color at the render edge. Water
-adds transparency, double-sided rendering, and no depth write so lake
-beds stay visible.
+registered material), per-voxel brightness variation is derived in the
+fragment shader from the world position (`floor(worldPos − normal/2)`
+recovers the voxel cell — correct on greedy quads where a per-vertex
+origin attribute would smear), and fog blends to the sky color at the
+render edge. Water adds transparency, double-sided rendering, and no
+depth write so lake beds stay visible.
 
 ## Testing & benchmarks
 
 - Vitest, node environment: coordinates (round trips, negatives,
-  boundaries), volume (index layout, bounds policy), mesher (face
-  counts, culling, winding, materials), controller (gravity, landing,
-  ledges, jump, walls, sliding, step climbing).
-- Benchmarks cover the mesher in solid and worst-case checkerboard
-  volumes at 16³ and 32³ — baseline numbers in `docs/performance.md`.
+  boundaries), volumes (dense + packed, index layout, bounds policy,
+  palette growth, randomized dense-vs-packed equivalence), raycast
+  (traversal, negatives, predicates), edits (command invariants, undo/
+  redo, journal round-trips), persistence (save round-trips, migration
+  and validation errors, autosave timing), mesher (face counts, culling,
+  winding, materials, greedy↔naive equivalence), LOD (hysteresis,
+  conservative downsample), controller (gravity, landing, ledges, jump,
+  walls, sliding, step climbing).
+- Benchmarks: `benchmarks/mesher.bench.ts` (naive vs greedy, solid/
+  checker/layered/terrain), `benchmarks/storage.bench.ts` (dense vs
+  packed), `benchmarks/terrain.bench.ts`. Baselines in
+  `docs/performance.md`.
 
 ## Deliberate non-goals (for now)
 
-- No greedy meshing, palette compression, or workers yet (Phase 6) —
-  the naive mesher is the correctness baseline those must match.
-- No editing/raycast interaction yet (Phase 5); the interaction raycast
-  stub from the Phase 1 checklist lands with editing.
-- No persisted state; the world regenerates from the seed (`?seed=` URL
-  parameter overrides the default).
+- No worker-based meshing or transferable buffers yet (Phase 6 deferred
+  item) — meshing is 2.5 ms/chunk and the frame budget absorbs it.
+- No brush/selection tooling yet (Phase 7 creator mode); editing is
+  single-voxel place/remove/paint/pick.
+- World state persists via the edit journal + seed; there is no bulk
+  chunk snapshot format yet (not needed while saves journal deltas).
+- No persisted state beyond localStorage autosave; `?seed=` URL
+  parameter starts a fresh world.

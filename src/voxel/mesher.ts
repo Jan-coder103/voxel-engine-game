@@ -1,4 +1,4 @@
-import type { VoxelVolume } from './voxelVolume';
+import type { VoxelData } from './voxelVolume';
 import { AIR, WATER, isOpaque, type VoxelMaterialID } from './materials';
 
 /**
@@ -95,8 +95,6 @@ export interface MeshData {
   normals: Float32Array;
   /** Material ID per vertex (per-face in practice). */
   materialIds: Uint16Array;
-  /** 3 floats per vertex, the integer voxel the vertex belongs to (shader variation). */
-  voxelOrigins: Float32Array;
   /** Triangle indices, 6 per quad. */
   indices: Uint32Array;
   readonly quadCount: number;
@@ -115,12 +113,11 @@ interface MeshBuffers {
   positions: number[];
   normals: number[];
   materialIds: number[];
-  voxelOrigins: number[];
   indices: number[];
 }
 
 function emptyBuffers(): MeshBuffers {
-  return { positions: [], normals: [], materialIds: [], voxelOrigins: [], indices: [] };
+  return { positions: [], normals: [], materialIds: [], indices: [] };
 }
 
 function toMeshData(buffers: MeshBuffers): MeshData {
@@ -128,14 +125,13 @@ function toMeshData(buffers: MeshBuffers): MeshData {
     positions: new Float32Array(buffers.positions),
     normals: new Float32Array(buffers.normals),
     materialIds: new Uint16Array(buffers.materialIds),
-    voxelOrigins: new Float32Array(buffers.voxelOrigins),
     indices: new Uint32Array(buffers.indices),
     quadCount: buffers.indices.length / 6,
   };
 }
 
 /** Extract an outward-facing culled mesh from a volume. */
-export function meshVolume(volume: VoxelVolume, query: VoxelQuery): ChunkMesh {
+export function meshVolume(volume: VoxelData, query: VoxelQuery): ChunkMesh {
   // In-bounds reads always come from the volume itself, so a query that
   // (incorrectly) handles in-bounds coordinates cannot corrupt the mesh.
   const voxelAt: VoxelQuery = (x, y, z) =>
@@ -165,7 +161,6 @@ export function meshVolume(volume: VoxelVolume, query: VoxelQuery): ChunkMesh {
             buffers.positions.push(x + cx, y + cy, z + cz);
             buffers.normals.push(dx, dy, dz);
             buffers.materialIds.push(material);
-            buffers.voxelOrigins.push(x, y, z);
           }
           buffers.indices.push(vertexBase, vertexBase + 1, vertexBase + 2);
           buffers.indices.push(vertexBase + 2, vertexBase + 1, vertexBase + 3);

@@ -6,10 +6,11 @@ and NPCs that react to all of it. Long-term roadmap lives in
 `MICRO_WORLD_DEVELOPMENT_PLAN.md`; session-by-session state lives in
 `MICRO_WORLD_PROGRESS.md`.
 
-**Current state:** Phases 2–4 complete — an infinite streamed world of
-deterministic seeded terrain (hills, mountains, lakes, beaches) rendered
-with the voxel material shader: chunk streaming, material palette with
-per-voxel variation, translucent water.
+**Current state:** Phases 0–6 complete — an infinite streamed world of
+deterministic seeded terrain that is **editable and saveable**: crosshair
+editing (place/remove/paint/pick) with undo/redo, an edit journal that
+survives reloads, localStorage autosave, greedy meshing with LOD, and
+palette-compressed chunk storage (Milestones 1–4 met).
 
 ## Quickstart
 
@@ -22,8 +23,12 @@ npm run dev        # dev server, print the URL it gives you
 
 Append `?seed=1234` to the URL for a different (still deterministic) world.
 
-Controls: click to capture the mouse, **WASD** to move, **Space** to jump,
-**Esc** to release the mouse. Fall into the void and you respawn.
+Controls: click to capture the mouse, **WASD** move, **Space** jump,
+**Esc** release the mouse; **LMB** remove, **RMB** place, **MMB** pick
+material, **F** paint, **1–7**/wheel select material, **Ctrl+Z/Y**
+undo/redo, **K** save, **L** load. Fall into the void and you respawn.
+The world autosaves (20 s cadence + when the tab hides) and restores on
+reload; `?seed=1234` starts a different fresh world.
 
 ## Scripts
 
@@ -47,9 +52,16 @@ src/main.ts                Game wiring: world → streaming → scene → loop
 src/voxel/                 World state (no three.js — see ADR-002)
   coordinates.ts           World/chunk/local conversions, negative-safe
   materials.ts             Material registry: metadata, classification, serialization
-  voxelVolume.ts           Dense Uint16Array cubic volume, bounds-checked
+  voxelVolume.ts           VoxelData interface + dense Uint16Array volume
+  packedVolume.ts          Palette-compressed volume + occupancy bitset (chunks)
+  occupancy.ts             Bit-per-voxel occupancy grid
   chunk.ts, world.ts       Chunk wrapper + chunk map (get/set, dirty propagation)
-  mesher.ts                Culled face mesher → typed arrays (opaque/water passes)
+  edits.ts                 EditCommand grouping, undo/redo history, player guard
+  raycast.ts               Voxel DDA selection raycast (pure)
+  persistence.ts           Versioned save schema, migration, autosave policy
+  mesher.ts                Naive culled mesher (correctness baseline)
+  greedyMesher.ts          Greedy mesher (production) → typed arrays
+  lod.ts                   LOD downsample + hysteresis level selection
   terrain.ts               Seeded RNG, value-noise fBm, height, chunk generator
   streaming.ts             Pure streaming math: desired set, priority, unload rings
 src/player/
@@ -59,7 +71,8 @@ src/render/                The only three.js code (see ADR-002)
   bootstrap.ts             Renderer, scene, camera, resize, frame loop
   voxelGeometry.ts         Mesher output → BufferGeometry
   voxelMaterial.ts         Voxel shader: palette texture, variation, light, fog
-  chunkMeshes.ts           Mesh cache, streaming queue, dirty remesh, disposal
+  chunkMeshes.ts           Mesh cache, streaming queue, LOD switches, dirty remesh
+  selectionViz.ts          Target wireframe + placement ghost
 tests/                     Vitest unit tests (node environment)
 benchmarks/                Vitest benchmarks (`npm run bench`)
 docs/                      Architecture, performance, known issues
@@ -75,6 +88,7 @@ docs/                      Architecture, performance, known issues
   (seed, coordinates) — no sequential RNG state — so chunk generation
   order never matters and unloaded chunks regenerate identically.
 - Mesher output is plain typed arrays (`positions`, `normals`,
-  `materialIds`, `voxelOrigins`, `indices`), not scene objects.
+  `materialIds`, `indices`), not scene objects. Chunks store voxels as a
+  palette + bit-packed indices (see `docs/voxel-storage.md`).
 - Strict TypeScript, ESLint + Prettier, and tests are enforced in CI
   (`.github/workflows/ci.yml`: lint → typecheck → test → build on Node 22).
