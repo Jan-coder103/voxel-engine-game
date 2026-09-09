@@ -31,23 +31,91 @@
 
 ## Overall Phase
 
-**Current phase:** Phases 2–4 complete — next: Phase 5 (Editing)
+**Current phase:** Phases 5–6 complete — next: Phase 7 (Creator Mode)
 
-**Current milestone:** Milestones 1–2 met (walkable chunked world); Phase 3/4 feature phases complete
+**Current milestone:** Milestones 1–4 met (walkable chunked world; editable, saveable sandbox; storage/meshing/LOD infrastructure for microvoxels)
 
-**Overall completion:** ~18% (Phases 0–4 done; raycast stub deferred to Phase 5)
+**Overall completion:** ~26% (Phases 0–6 done; Milestone 4 met at infrastructure level — voxel-size increase itself deferred until benchmarks demand it)
 
-**Last completed task:** Session 002 — chunk system + streaming, deterministic seeded terrain, material registry + voxel shader, 82 tests green, three commits (20ce105, d7017e3, cd87560), browser-verified on two seeds
+**Last completed task:** Session 003 — editing (raycast, commands, journal, save/load + autosave) and microvoxels (palette storage, greedy mesher, LOD with conservative downsample), 147 tests green, two commits (15add77, 9cac43a), browser-verified with playtesting feedback incorporated
 
 **Current task:** None — clean handoff point
 
 **Blocked by:** Nothing
 
-**Next recommended action:** Start Phase 5 (Editing): voxel DDA selection raycast, place/remove with dirty-chunk remeshing (the streaming layer already remeshes `World.setVoxel` marks), undo/redo commands, then save/load. The Session 002 log has the exact entry state.
+**Next recommended action:** Start Phase 7 (Creator Mode): pure brush system (sphere/box/cylinder × place/delete/paint) producing edit lists through `applyEdits`, box selection + clipboard, prefab serialization. The edit-command/journal plumbing from Phase 5 is the foundation — brushes are "many edits, one command".
 
 ---
 
 # Session Log
+
+## Session 003 — 2026-09-09
+
+**Status:** Complete — Phases 5 and 6 done; Milestones 3 and 4 met. Phase 7 intentionally not started (user scoped the session to "next 3 phases" originally, then narrowed to "finish Phase 6 + handoff").
+
+### Completed
+
+- [x] Phase 5: DDA selection raycast (`src/voxel/raycast.ts`, pure + tested, water not targetable), wireframe target highlight + translucent placement ghost, place/remove/paint(F)/pick(MMB) through grouped `EditCommand`s with undo/redo (128-deep), material hotbar (1–7/wheel), player-overlap placement guard, bedrock floor protection
+- [x] Phase 5: World edit journal (per-chunk voxel deltas, replayed on regeneration — edits survive unload/prune/reload), versioned save schema v1 (seed + terrain + material table + journal), migration chain, structural validation, `SaveStore` (memory + localStorage), `AutosavePolicy` (20 s dirty-gated + save-on-hide), boot restore unless `?seed=` overrides, HUD edit line
+- [x] Phase 6: `OccupancyGrid` + `PackedVolume` (palette + bit-packed indices, auto-widening, 256-material envelope) behind a shared `VoxelData` interface; chunks now store packed (1536 B vs 8192 B dense on terrain)
+- [x] Phase 6: `meshVolumeGreedy` (per-axis sweep, maximal-rectangle merge, growable typed buffers) proven unit-face-equivalent to the naive baseline on random volumes, terrain chunks, and cross-chunk worlds; winding checked per quad; production switch; terrain chunk 1506 → 185 quads, whole view ~82.5k → ~9k
+- [x] Phase 6: LOD — `downsampleVolume` + `desiredLod` hysteresis + ChunkMeshManager integration (LOD1 scales 2×); 88/226 chunks at LOD1 at radius 6
+- [x] Phase 6: shader variation now derives the voxel cell from the fragment world position (correct on merged quads); `voxelOrigins` attribute removed end to end
+- [x] Phase 6: benchmarks (naive vs greedy all scenes, dense vs packed storage, quad counts) + `docs/voxel-storage.md` tradeoff study (sparse hash, RLE, SVO investigated and rejected for now)
+- [x] 65 new tests (147 total); docs updated (architecture, performance, known-issues, README, CHANGELOG)
+
+### Fixed during verification
+
+- Game loop died on the first targeting frame: `world.getVoxel` was passed as an unbound method to the raycast (`this` undefined). Found via window error trap; fixed with an arrow closure.
+- **LOD1 sat 1–2 voxels above the full-resolution mesh** (found by user playtesting: "LOD seems to be placed 1 or 2 blocks too high, when I approach, it shifts down a bit and increases resolution"): the downsample majority rule treated half-solid surface blocks as fully solid. Fix: count air as a candidate and let air win ties — LOD can only erode, never inflate. Regression-tested with odd/even surface-height cases.
+- Greedy mesher emitted faces for out-of-bounds cells when the world query returned solid terrain outside the chunk (only visible in cross-chunk tests): only in-volume cells may emit now.
+- Greedy quad corners had two unset components (degenerate quads) after a refactor — caught by the winding test before any commit.
+- Ctrl+Z/Y only work if Ctrl is still held when the key event is consumed (synthetic ultra-fast release in tests missed it; real usage unaffected).
+
+### Deferred deliberately
+
+- Phase 7 (Creator Mode) — next session.
+- Transferable mesh buffers / worker meshing (Phase 6 checklist item): greedy meshing is ~2.5 ms/chunk and the frame budget absorbs it.
+- Hold-to-paint continuous strokes (each click is one undo step; brush strokes will want stroke grouping in Phase 7).
+- Packed-volume >256-material dense fallback path (documented envelope; unreachable with 7 materials).
+
+### Tests
+
+- Unit tests: 147 passed (14 files)
+- Integration tests: manual browser GUI verification (editing, undo/redo, save/restore across reload, LOD transition after fix)
+- Typecheck: clean (strict) · Lint: clean · Build: succeeds (~545 kB minified / ~140 kB gzip three.js chunk)
+
+### Benchmarks
+
+- FPS: 60 (vsync-capped, 1280×720) at render radius 6; 226 chunk meshes (88 LOD1), ~8.8–9.1k quads (was ~82.5k)
+- Meshing: greedy terrain chunk 2.46 ms (naive 3.15 ms); solid 16³ 2.14 ms; checker 16³ worst case 7.06 ms
+- Storage: packed reads ~4× dense but mesh-bound overall; 1536 B vs 8192 B per terrain chunk
+- Other: greedy LOD1 terrain chunk ≈ 70 quads; generateChunk ≈ 0.58 ms
+
+### Architecture changes
+
+- `VoxelData` interface (`voxelVolume.ts`): dense and packed storage interchangeable; `Chunk.volume` is now a `PackedVolume`.
+- `MeshData` lost `voxelOrigins`; variation is world-position-derived in the shader.
+- `ChunkMeshManager` gains LOD params/switching (budget order: dirty → LOD switches → new chunks).
+- `World` gains the edit journal + `exportEdits`/`loadEdits`; `VoxelVolume`/`PackedVolume` gain flat-index access + `fill`.
+- New dirs: `src/persistence/` (localStorage store — DOM adapter, keeps `src/voxel/` pure).
+
+### Known issues
+
+- See `docs/known-issues.md`: LOD erodes ≤1 voxel (by design), approximate LOD seam culling, no worker meshing, water placeholder, single-voxel editing granularity.
+
+### Next task
+
+- Task: Phase 7 — Creator Mode (brushes, selection, clipboard, prefabs, inspector)
+
+### Recommended next steps
+
+1. Pure brush core in `src/creator/` (shapes × tools → edit lists) flowing through `applyEdits` — one brush stroke = one undoable command; deterministic noise from the existing integer hash.
+2. Box selection + clipboard (copy/cut/paste/rotate/mirror) as pure volume transforms; paste = one grouped command through the journal.
+3. Prefab serialization (JSON, versioned like the world save) + voxel inspector; render-side selection wireframe and brush ghost.
+4. GIZMOS/transform gizmos and erosion/damage brushes: defer or cut — first-person UX fits clipboard transforms better.
+
+---
 
 ## Session 002 — 2026-09-08
 
@@ -356,38 +424,38 @@ pickup instructions in `HANDOFF.md`.
 
 ## Basic Editing
 
-- [ ] Add voxel placement
-- [ ] Add voxel deletion
-- [ ] Add material painting
-- [ ] Add selection raycast
-- [ ] Add edit preview
-- [ ] Add edit confirmation
-- [ ] Add dirty chunk updates
+- [x] Add voxel placement _(RMB places selected material into the face-adjacent cell; refused into the player AABB)_
+- [x] Add voxel deletion _(LMB; bedrock layer y=0 protected)_
+- [x] Add material painting _(F recolors the targeted voxel; MMB eyedropper selects from the world)_
+- [x] Add selection raycast _(pure DDA in `src/voxel/raycast.ts`, water not targetable)_
+- [x] Add edit preview _(translucent placement ghost tinted with the selected material + wireframe target highlight)_
+- [x] Add edit confirmation _(click applies; no-ops and refused placements leave history untouched)_
+- [x] Add dirty chunk updates _(edits route through `World.setVoxel`; dirty remeshing was already end-to-end)_
 
 ## Undo / Redo
 
-- [ ] Define `EditCommand`
-- [ ] Implement voxel edit command
-- [ ] Implement undo stack
-- [ ] Implement redo stack
-- [ ] Add grouped commands
-- [ ] Test undo/redo invariants
+- [x] Define `EditCommand` _(target values + captured previous values)_
+- [x] Implement voxel edit command _(applyEdits groups multi-cell edits; no-ops skipped)_
+- [x] Implement undo stack _(128-deep cap, oldest falls off)_
+- [x] Implement redo stack _(push clears the redo branch)_
+- [x] Add grouped commands _(multi-cell commands atomic; brush-stroke grouping arrives with Phase 7)_
+- [x] Test undo/redo invariants _(round-trips, atomicity, redo-drop, cap, journal interplay)_
 
 ## Save / Load
 
-- [ ] Define world serialization schema
-- [ ] Serialize chunks
-- [ ] Deserialize chunks
-- [ ] Save world
-- [ ] Load world
-- [ ] Add world version
-- [ ] Add migration mechanism
-- [ ] Add autosave
-- [ ] Add crash-recovery strategy
+- [x] Define world serialization schema _(v1: seed + terrain params + material table snapshot + edit journal)_
+- [x] Serialize chunks _(the journal — terrain regenerates from seed)_
+- [x] Deserialize chunks _(loadEdits applies to loaded chunks, replays on generation)_
+- [x] Save world _(K manual + autosave + save-on-tab-hide)_
+- [x] Load world _(L manual + boot restore unless `?seed=` overrides)_
+- [x] Add world version _(WORLD_FORMAT_VERSION + embedded material-format version)_
+- [x] Add migration mechanism _(per-version migrator chain; unknown/newer versions rejected)_
+- [x] Add autosave _(AutosavePolicy: 20 s dirty-gated interval)_
+- [x] Add crash-recovery strategy _(save on visibilitychange-hidden; boot restores last autosave)_
 
 ### Milestone
 
-- [ ] **Milestone 3 complete: Editable, saveable voxel sandbox**
+- [x] **Milestone 3 complete: Editable, saveable voxel sandbox** _(met — browser-verified: place/remove/paint/pick, undo/redo, reload restores edits on two seeds)_
 
 ---
 
@@ -395,34 +463,34 @@ pickup instructions in `HANDOFF.md`.
 
 ## Storage
 
-- [ ] Benchmark dense storage
-- [ ] Implement palette compression
-- [ ] Benchmark palette compression
-- [ ] Investigate sparse chunks
-- [ ] Implement occupancy bitsets
-- [ ] Investigate SVO representation
-- [ ] Document representation tradeoffs
+- [x] Benchmark dense storage _(storage.bench.ts: fill/read/mixed ops)_
+- [x] Implement palette compression _(PackedVolume: palette + bit-packed indices, 1/2/4/8-bit auto-widening, 256-material envelope)_
+- [x] Benchmark palette compression _(reads ~4× dense; meshing stays mesh-bound; 1536 B vs 8192 B per terrain chunk)_
+- [x] Investigate sparse chunks _(per-voxel hash rejected at 40–90% fill rates; occupancy `isEmpty` covers the all-air case — docs/voxel-storage.md)_
+- [x] Implement occupancy bitsets _(OccupancyGrid: O(1) air/empty tests, maintained count)_
+- [x] Investigate SVO representation _(rejected at 16³ — node overhead dwarfs a 2.5 KB chunk; checkpoint at 32+ voxel chunks — docs/voxel-storage.md)_
+- [x] Document representation tradeoffs _(docs/voxel-storage.md)_
 
 ## Meshing
 
-- [ ] Implement greedy mesher
-- [ ] Benchmark greedy vs naive
-- [ ] Add mesh cache
-- [ ] Reduce allocations
-- [ ] Add transferable mesh buffers
-- [ ] Add mesh generation benchmark
+- [x] Implement greedy mesher _(meshVolumeGreedy: per-axis sweep + maximal rectangles; production)_
+- [x] Benchmark greedy vs naive _(1.3–1.5× build time, 8× fewer quads on terrain; docs/performance.md)_
+- [x] Add mesh cache _(pre-existing ChunkMeshManager cache; now also caches per-LOD)_
+- [x] Reduce allocations _(growable typed buffers in the greedy mesher; naive kept with JS arrays as baseline)_
+- [ ] Add transferable mesh buffers _(deferred: no worker infrastructure; meshing is 2.5 ms/chunk)_
+- [x] Add mesh generation benchmark _(greedy + naive across solid/checker/layered/terrain scenes)_
 
 ## LOD
 
-- [ ] Define LOD levels
-- [ ] Implement chunk LOD
-- [ ] Implement LOD selection
-- [ ] Implement transition handling
-- [ ] Benchmark visual/performance tradeoffs
+- [x] Define LOD levels _(LOD0 full, LOD1 = 2× downsampled; LOD1_FACTOR)_
+- [x] Implement chunk LOD _(downsampleVolume + scaled geometry rebuild)_
+- [x] Implement LOD selection _(desiredLod from XZ chunk distance)_
+- [x] Implement transition handling _(hysteresis band 3.5/4.5 chunks; budgeted remesh; no flicker)_
+- [x] Benchmark visual/performance tradeoffs _(70 quads/chunk at LOD1; 88/226 chunks at LOD1; conservative downsample after playtest)_
 
 ### Milestone
 
-- [ ] **Milestone 4 complete: High-resolution microvoxel world**
+- [x] **Milestone 4 complete: High-resolution microvoxel world** _(met at infrastructure level: palette storage + greedy meshing + LOD verified end to end; the actual voxel-size reduction is deferred until benchmarks demand it — the storage doc names the checkpoint)_
 
 ---
 
@@ -999,14 +1067,14 @@ Only after core deterministic simulation is stable.
 
 ## Core invariants
 
-- [ ] Coordinate conversion round-trip
-- [ ] Chunk generation determinism
-- [ ] Serialization round-trip
-- [ ] Undo/redo round-trip
-- [ ] Place/remove round-trip
-- [ ] Editing air is safe
-- [ ] Chunk boundary edits are correct
-- [ ] Negative coordinates are correct
+- [x] Coordinate conversion round-trip _(tests/coordinates.test.ts, Session 001)_
+- [x] Chunk generation determinism _(tests/terrain.test.ts, Session 002)_
+- [x] Serialization round-trip _(tests/persistence.test.ts, Session 003)_
+- [x] Undo/redo round-trip _(tests/edits.test.ts, Session 003)_
+- [x] Place/remove round-trip _(tests/edits.test.ts, Session 003)_
+- [x] Editing air is safe _(air removal is a no-op; placement into air covered — Session 003)_
+- [x] Chunk boundary edits are correct _(dirty propagation + journal + greedy world-query equivalence — Sessions 002–003)_
+- [x] Negative coordinates are correct _(raycast + edits tests, Session 003)_
 
 ## Simulation invariants
 
