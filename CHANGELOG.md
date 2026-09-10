@@ -4,6 +4,73 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.9.0] — 2026-09-10 — Phase 11 (Structural Simulation)
+
+### Added
+
+- Structural simulation (`src/voxel/structure.ts`), replacing the
+  Phase 8 edit-time support approximation with a ticked, budgeted
+  `StructuralSim` over a graph of solid cells:
+  - **Support graph**: 6-neighbor adjacency where vertical connections
+    always transmit support and horizontal ones only within
+    `MAX_CANTILEVER` (6) groundless hops — a 0/1-cost BFS from bedrock
+    and region-edge anchors. Floors hold from walls, plank bridges
+    stand within ~6 of a shore, overhangs past the limit drop only
+    their far half, and a roof whose last pillar is gone falls entirely
+    (the Phase 11 gate: destroy ground floor → upper floors detach and
+    collapse).
+  - **Simplified stress + failure thresholds**: vertical stack load
+    (one mass unit per solid cell above) vs a derived
+    `MATERIAL_STRENGTH` table (wood 22, stone 26, dirt 16, sand 10,
+    grass 14). Only journaled (built/edited) cells can fracture, so
+    natural terrain never avalanches, while load counts all overlying
+    mass — a wood post propping up a stone overhang still fails.
+  - **Progressive collapse**: failing cells become air as one grouped
+    undoable `collapse` command (debris/dust/sound/`structureCollapsed`
+    as before); the edits re-queue the region, so staged failures
+    cascade across ticks, bounded by `MAX_COLLAPSE_CELLS` (4096) and
+    the 150k-cell scan budget.
+- **Fire → collapse coupling** (the deferred Phase 10 item): the
+  structural sim chains onto the World change hook, and burn-out is a
+  real `setVoxel(AIR)` write — a burned-through pillar drops its roof
+  with no special-case code. The hook now also carries the cell's
+  previous material so only support-losing transitions queue analyses
+  (placements and water flow never trigger; building stays free).
+- **Structural debug overlay** (`src/render/structureViz.ts`, toggled
+  with **G**): flashes failed cells for ~1.6 s — red for lost support,
+  orange for stress fractures. HUD shows `· struct qN` while regions
+  are pending.
+- `benchmarks/structure.bench.ts`: house-scale gate analysis **2.2 ms**
+  mean on real terrain (plan budget < 5 ms), worst-case fully-solid
+  region 3.2 ms, 54k-cell brush region 4.8 ms, full collapse cascade
+  ≈ 7 ms spread over 16 ticks. Baselines in `docs/performance.md`.
+
+### Changed
+
+- `World.onVoxelChanged` gains a `previous` material argument (fluid and
+  fire wrappers forward it; behavior unchanged for them).
+- `World` exposes `isEdited(x, y, z)` / `journalFor(key)` — the edit
+  journal doubles as the "player-built vs natural terrain" signal for
+  the stress model.
+- `src/voxel/support.ts` is gone (`checkSupport`/`supportRegionFor`
+  replaced by `analyzeStructure`/`structureRegionFor` in
+  `src/voxel/structure.ts`); regions always scan the full world height
+  (cut-off tops previously undercounted loads).
+
+### Tests
+
+- `tests/structure.test.ts` (24 tests): support/cantilever fixtures
+  (incl. the 13×5 pavilion and partial roof collapse), plank-bridge
+  limit boundary, stress thresholds + terrain exemption, propped-overhang
+  failure, two-stage cascade, sim queueing rules (placements/water never
+  queue), region merging, cap truncation + cascade completion,
+  determinism across worlds, reset; fire→structure coupling
+  (burned pillar drops roof); `World.isEdited` contract. Suite total
+  278 tests, all green; typecheck/lint/build clean; headless browser
+  suite extended with a Phase 11 section (gate, cantilever hold, tower
+  stress cascade, fire coupling, G overlay) — all green, zero page
+  errors.
+
 ## [0.8.0] — 2026-09-10 — Phase 10 (Fire and Smoke)
 
 ### Added

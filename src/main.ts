@@ -16,7 +16,7 @@ import { applyEdits, EditHistory, intersectsPlayerCell, type VoxelEdit } from '.
 import { FluidSim } from './voxel/fluid';
 import { FireSim } from './voxel/fire';
 import { debrisFromCells, explode } from './voxel/damage';
-import { checkSupport, supportRegionFor } from './voxel/support';
+import { StructuralSim } from './voxel/structure';
 import {
   AutosavePolicy,
   deserializeWorld,
@@ -27,7 +27,6 @@ import { EventBus } from './sim/events';
 import {
   brushCells,
   brushEdits,
-  brushBounds,
   clampBrushSize,
   type BrushShape,
   type BrushTool,
@@ -49,6 +48,7 @@ import { CreatorViz } from './render/creatorViz';
 import { DebrisSystem } from './render/debris';
 import { DustSystem } from './render/dust';
 import { FireFx } from './render/firefx';
+import { StructureViz } from './render/structureViz';
 import { SoundFx } from './audio/sfx';
 import { LocalStorageSaveStore } from './persistence/localStorageStore';
 import { InputManager } from './player/input';
@@ -77,6 +77,8 @@ const MAX_SUBSTEPS = 5;
 const FLUID_CELLS_PER_TICK = 384;
 /** Fire cells simulated per fixed step (Phase 10 activity budget). */
 const FIRE_CELLS_PER_TICK = 256;
+/** Structural analyses per fixed step (Phase 11; each is a few ms at most). */
+const STRUCTURE_ANALYSES_PER_TICK = 1;
 
 const EDIT_REACH = 6;
 const AUTOSAVE_INTERVAL_MS = 20_000;
@@ -127,6 +129,7 @@ function main(): void {
   const world = new World((chunk) => generateChunk(chunk, terrain));
   const fluid = new FluidSim(world); // before any chunk generation (hooks)
   const fire = new FireSim(world); // chains onto the fluid change hook
+  const structure = new StructuralSim(world); // chains after fire (burn-outs collapse)
   if (restore) {
     world.loadEdits(restore.edits);
     fluid.loadLevels(restore.waterLevels ?? {});
@@ -235,7 +238,6 @@ function main(): void {
       }
     }
     edit(edits, 'cut');
-    runSupportCheck(min, max);
   };
 
   const pasteClipboard = (hit: RaycastHit): void => {
@@ -318,10 +320,6 @@ function main(): void {
         : undefined,
     );
     edit(edits, `brush ${brush.tool}`);
-    if (brush.tool === 'delete') {
-      const bounds = brushBounds(brush, center);
-      runSupportCheck(bounds.min, bounds.max);
-    }
   };
 
   // --- Destruction (Phase 8) --------------------------------------------
@@ -330,6 +328,7 @@ function main(): void {
   const debris = new DebrisSystem(engine.scene);
   const dust = new DustSystem(engine.scene);
   const fireFx = new FireFx(engine.scene);
+  const structureViz = new StructureViz(engine.scene);
   const colorFor = (material: VoxelMaterialID) => getMaterial(material).color;
   let explosionSeed = 1;
 
@@ -351,14 +350,13 @@ function main(): void {
   });
 
   /**
-   * After a destructive edit: find solid cells that lost their support and
-   * collapse them as one undoable command. Debris specs are captured
-   * before the edit (they need the cells' materials), then applied.
+   * Structural collapse (Phase 11): the sim proposes the cells that lost
+   * support or fractured under load; they fall as one undoable command.
+   * Debris specs are captured before the edit (they need the cells'
+   * materials). Applying the edit re-queues the region through the world
+   * hook, so multi-stage collapses cascade across the next ticks.
    */
-  const runSupportCheck = (min: WorldCoordinate, max: WorldCoordinate): void => {
-    const result = checkSupport(voxelQuery, supportRegionFor({ min, max }));
-    if (!result.checked || result.unsupported.length === 0) return;
-    const cells = result.unsupported;
+  structure.onCollapse = ({ cells }) => {
     let cx = 0;
     let cy = 0;
     let cz = 0;
@@ -386,6 +384,7 @@ function main(): void {
       spread: Math.min(6, 2 + Math.cbrt(cells.length) / 2),
       rise: 1.8,
     });
+    structureViz.show(cells);
     bus.emit({ type: 'structureCollapsed', x: cx, y: cy, z: cz, cells: cells.length });
     sfx.thud();
   };
@@ -412,10 +411,6 @@ function main(): void {
       radius,
       destroyed: result.destroyed,
     });
-    runSupportCheck(
-      { x: hit.voxel.x - radius, y: Math.max(1, hit.voxel.y - radius), z: hit.voxel.z - radius },
-      { x: hit.voxel.x + radius, y: hit.voxel.y + radius, z: hit.voxel.z + radius },
-    );
   };
 
   const saveNow = (): void => {
@@ -502,7 +497,6 @@ function main(): void {
       // Remove: refuse the bedrock floor so the world bottom stays closed.
       if (hit.voxel.y <= BEDROCK_Y) return;
       edit([{ ...hit.voxel, material: AIR }], 'remove');
-      runSupportCheck(hit.voxel, hit.voxel);
     } else if (button === 2) {
       // Place into the face-adjacent cell, never into the player. Water
       // cells may be filled (the fluid treats it as displacement).
@@ -584,6 +578,7 @@ function main(): void {
         world.loadEdits(data.edits);
         fluid.loadLevels(data.waterLevels ?? {});
         fire.reset(); // loads are world resets: no fire survives a load
+        structure.reset();
         history.clear();
         autosave.markDirty();
       } catch (error) {
@@ -599,6 +594,10 @@ function main(): void {
     }
     if (code === 'KeyN') {
       sfx.setEnabled(!sfx.enabled);
+      return;
+    }
+    if (code === 'KeyG') {
+      structureViz.enabled = !structureViz.enabled; // structural debug overlay
       return;
     }
     if (code === 'KeyC') {
@@ -682,6 +681,9 @@ function main(): void {
       // Fire joins the same fixed step and budget scheme (Phase 10).
       fire.tick(FIRE_CELLS_PER_TICK);
       if (fire.takeDirty()) autosave.markDirty();
+      // Structural analysis last: it sees this step's edits, burn-outs
+      // and the previous stage of any cascading collapse (Phase 11).
+      structure.tick(STRUCTURE_ANALYSES_PER_TICK);
       accumulator -= FIXED_DT;
     }
 
@@ -701,6 +703,7 @@ function main(): void {
     dust.update(frameDt);
     // Fire feedback: embers + smoke emitted from the burning cells.
     fireFx.update(frameDt, fire.burningList());
+    structureViz.update(frameDt);
 
     // Targeting + edit previews (render only; input handled above).
     const hit = input.isLocked ? targetHit() : undefined;
@@ -781,7 +784,9 @@ function main(): void {
           `debris ${debris.activeCount}/${debris.capacity}` +
           (player.inWater ? ' · swimming' : '') +
           (fluid.activeCount > 0 ? ` · water ${fluid.activeCount}` : '') +
-          (fire.burningCount > 0 ? ` · fire ${fire.burningCount}` : ''),
+          (fire.burningCount > 0 ? ` · fire ${fire.burningCount}` : '') +
+          (structure.pendingCount > 0 ? ` · struct q${structure.pendingCount}` : '') +
+          (structureViz.enabled ? ' · struct-viz (G)' : ''),
       ];
       if (creator.enabled) {
         const b = creator.brush;
@@ -833,6 +838,8 @@ function main(): void {
       fluid,
       fire,
       fireFx,
+      structure,
+      structureViz,
       isLocked: () => input.isLocked,
     };
   }

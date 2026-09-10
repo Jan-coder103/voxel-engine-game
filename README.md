@@ -6,18 +6,20 @@ and NPCs that react to all of it. Long-term roadmap lives in
 `MICRO_WORLD_DEVELOPMENT_PLAN.md`; session-by-session state lives in
 `MICRO_WORLD_PROGRESS.md`.
 
-**Current state:** Phases 0–10 complete — an infinite streamed world of
+**Current state:** Phases 0–11 complete — an infinite streamed world of
 deterministic seeded terrain that is **editable, saveable, and
 destructible**: brush tools, box selection, clipboard, prefabs, and a
 voxel inspector (creator mode), explosions with material resistance,
-support-aware structural collapse, pooled debris and dust, procedural
-sound, **flowing water** (cellular fluid with sources, gravity,
-equalization, flow-height rendering, swimming, save-format v2), and
-**fire** — heat-driven ignition and spread, fuel burn-out, water
-extinguishing, explosion heat coupling, pooled embers and smoke
-(Milestones 1–7 met plus fire↔water interaction; the Phase 8 gate
-criteria are verified by tests, and water mass conservation is tested
-exactly).
+pooled debris and dust, procedural sound, **flowing water** (cellular
+fluid with sources, gravity, equalization, flow-height rendering,
+swimming, save-format v2), **fire** — heat-driven ignition and spread,
+fuel burn-out, water extinguishing, explosion heat coupling, pooled
+embers and smoke — and a **structural simulation** with real support
+graph semantics: cantilevered floors and bridges hold within reach of a
+wall or pier, overstressed columns fracture under load (natural terrain
+is exempt), collapses cascade progressively, and burned-through pillars
+drop their roofs (Milestones 1–8 met; the Phase 8, 9 and 11 gate
+criteria are verified by tests, benchmarks, and headless browser runs).
 
 ## Quickstart
 
@@ -42,9 +44,11 @@ Creator mode (**C**): **LMB** applies the brush, **Q/E** cycle tools
 (place/delete/paint/replace/explode/ignite), **V** cycles shapes
 (sphere/box/cylinder/noise), **[ ]** brush size, **B** box-select (two
 clicks) then **Ctrl+C/X/V** copy/cut/paste, **R**/**M** rotate/mirror the
-clipboard, **O/P** save/load prefabs, **I** voxel inspector. **Ignite**
+clipboard, **O/P** save/load prefabs, **I** voxel inspector, **G** structure debug. **Ignite**
 sets flammable cells on fire (wood/grass burn, water douses), and
-explosions ignite flammables around the crater rim.
+explosions ignite flammables around the crater rim. Structures have
+load-bearing limits: pull a pillar and the roof drops, over-build a
+wood tower and it fractures at the base when disturbed.
 
 ## Scripts
 
@@ -67,7 +71,7 @@ index.html                 Page shell: overlay, HUD, crosshair, hotbar
 src/main.ts                Game wiring: world → streaming → scene → loop
 src/voxel/                 World state (no three.js — see ADR-002)
   coordinates.ts           World/chunk/local conversions, negative-safe
-  materials.ts             Material registry: metadata, classification, serialization, hardness
+  materials.ts             Material registry: metadata, classification, serialization, hardness/strength/fire tables
   voxelVolume.ts           VoxelData interface + dense Uint16Array volume
   packedVolume.ts          Palette-compressed volume + occupancy bitset (chunks)
   occupancy.ts             Bit-per-voxel occupancy grid
@@ -77,7 +81,7 @@ src/voxel/                 World state (no three.js — see ADR-002)
   fluid.ts                 Cellular water: levels, sources, sleep/wake, budgeted ticks
   fire.ts                  Cellular fire: fuel, heat, spread, extinguish (pure)
   damage.ts                Explosion damage fields, debris specs (pure)
-  support.ts               Detached-region (collapse) detection (pure)
+  structure.ts             Structural sim: support graph (cantilever), stress, collapse (pure)
   persistence.ts           Versioned save schema, migration, autosave policy
   mesher.ts                Naive culled mesher (correctness baseline)
   greedyMesher.ts          Greedy mesher (production) → typed arrays
@@ -105,6 +109,7 @@ src/render/                The only three.js code (see ADR-002)
   debris.ts                Pooled InstancedMesh debris with mini physics
   dust.ts                  Pooled voxel dust puffs
   firefx.ts                Pooled embers + smoke particles for burning cells
+  structureViz.ts          Collapse/stress debug overlay (G key)
 src/audio/
   sfx.ts                   Procedural WebAudio destruction sounds (DOM adapter)
 tests/                     Vitest unit tests (node environment)

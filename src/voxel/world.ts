@@ -46,8 +46,19 @@ export class World {
    * fires after every successful `setVoxel` (edits, undo/redo, sim writes);
    * `onChunkReady` fires once at the end of `ensureChunk` (after journal
    * replay). Both are plain fields so tests can attach/detach freely.
+   *
+   * `onVoxelChanged` also receives the material the cell held before the
+   * write (Phase 11): the structural sim only re-analyzes when solid
+   * matter vanished, which the new material alone cannot distinguish
+   * (floods write water into air; only edits replace solids).
    */
-  onVoxelChanged?: (x: number, y: number, z: number, material: VoxelMaterialID) => void;
+  onVoxelChanged?: (
+    x: number,
+    y: number,
+    z: number,
+    material: VoxelMaterialID,
+    previous: VoxelMaterialID,
+  ) => void;
   onChunkReady?: (chunk: Chunk) => void;
 
   constructor(private readonly generate: ChunkGenerator = () => {}) {}
@@ -152,6 +163,31 @@ export class World {
     return removed;
   }
 
+  /**
+   * True if the cell carries a journaled edit — it was written through
+   * `setVoxel` at least once (player edit, brush, sim write, undo) rather
+   * than coming straight from the generator. The structural stress model
+   * uses this to leave natural terrain alone (see structure.ts).
+   */
+  isEdited(x: number, y: number, z: number): boolean {
+    const cx = worldToChunk(x);
+    const cy = worldToChunk(y);
+    const cz = worldToChunk(z);
+    const chunk = this.chunks.get(chunkKey(cx, cy, cz));
+    if (!chunk) return false;
+    const journaled = this.editJournal.get(chunk.key);
+    if (!journaled) return false;
+    return journaled.has(chunk.volume.index(worldToLocal(x), worldToLocal(y), worldToLocal(z)));
+  }
+
+  /**
+   * Read-only view of one chunk's journal (voxel index → material), for
+   * region scans that would otherwise call `isEdited` per cell.
+   */
+  journalFor(key: string): ReadonlyMap<number, VoxelMaterialID> | undefined {
+    return this.editJournal.get(key);
+  }
+
   /** Read a voxel anywhere in world space; unloaded chunks are air. */
   getVoxel(x: number, y: number, z: number): VoxelMaterialID {
     const chunk = this.cachedGetChunk(worldToChunk(x), worldToChunk(y), worldToChunk(z));
@@ -170,6 +206,7 @@ export class World {
     const lx = worldToLocal(x);
     const ly = worldToLocal(y);
     const lz = worldToLocal(z);
+    const previous = chunk.volume.getOrAir(lx, ly, lz);
     if (!chunk.volume.set(lx, ly, lz, material)) return false;
 
     // Journal the edit so it survives unload/regeneration and persists.
@@ -188,7 +225,7 @@ export class World {
     if (ly === CHUNK_SIZE - 1) this.markDirty(cx, cy + 1, cz);
     if (lz === 0) this.markDirty(cx, cy, cz - 1);
     if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cy, cz + 1);
-    this.onVoxelChanged?.(x, y, z, material);
+    this.onVoxelChanged?.(x, y, z, material, previous);
     return true;
   }
 

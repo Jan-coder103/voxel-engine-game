@@ -104,8 +104,8 @@ export class FireSim {
     // The World exposes a single change hook; whatever sim was built first
     // owns it. Wrap instead of overwrite so both sims observe edits.
     const previous = world.onVoxelChanged;
-    world.onVoxelChanged = (x, y, z, material) => {
-      previous?.(x, y, z, material);
+    world.onVoxelChanged = (x, y, z, material, before) => {
+      previous?.(x, y, z, material, before);
       const key = packCellKey(x, y, z);
       // Any external write (edit, undo, fluid, collapse) resets the cell's
       // fire state — fresh material starts cold — and re-evaluates the spot.

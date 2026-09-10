@@ -1,6 +1,6 @@
 # Architecture
 
-Scope: what exists now (Phases 0–10) plus the boundaries already fixed for
+Scope: what exists now (Phases 0–11) plus the boundaries already fixed for
 later phases. The full decision log lives in
 `MICRO_WORLD_PROGRESS.md` (ADR-001…005); this document explains the
 practical consequences for code layout.
@@ -21,7 +21,7 @@ practical consequences for code layout.
 │                                               │  prefab, inspector
 │ src/sim/                    pure event bus    │  typed GameEvent routing
 │ src/voxel/                  pure world state  │  coordinates, volume, mesher,
-│                                               │  damage, support
+│                                               │  damage, structure
 └──────────────────────────────────────────────┘
 ```
 
@@ -113,7 +113,7 @@ undo/redo, journaling, and autosave come free.
 
 ## Destruction (Phase 8)
 
-The pipeline: tool click → pure damage/support computation → one grouped
+The pipeline: tool click → pure damage computation → one grouped
 `applyEdits` command → pooled render-side debris/dust → typed events →
 procedural audio. Believability over accuracy (plan §26/§105).
 
@@ -127,17 +127,6 @@ procedural audio. Believability over accuracy (plan §26/§105).
   and a hard cap; `debrisFromCells` does the same for collapses
   (downward tumble). Nothing here mutates the world — callers flow the
   edit list through `applyEdits`.
-- **Support check** (`src/voxel/support.ts`): after destructive edits,
-  `checkSupport` flood-fills 6-connected solid components over the
-  affected region (edit bounds ±`SUPPORT_MARGIN`, from bedrock up) and
-  reports cells in components that anchor to neither the bedrock layer
-  nor the region's horizontal edge. Two passes for speed: one world
-  query per cell into a flat snapshot (the `World` chunk memo makes
-  these reads cheap), then a flat-index BFS that allocates nothing per
-  cell. Above 150k region cells the check is skipped (`checked: false`).
-  The main loop collapses unsupported cells as one undoable `collapse`
-  command (debris specs captured before the edit, since they need the
-  cells' materials).
 - **Event bus** (`src/sim/events.ts`): typed `GameEvent` union
   (`explosion`, `structureCollapsed`, `fireIgnited`, `fireExtinguished`),
   synchronous dispatch, one handler throwing doesn't block the rest
@@ -180,8 +169,10 @@ not user intent — otherwise undo history would flood).
   through `World.setVoxel` (journaled + remeshed), and a failed write
   (unloaded chunk) must not re-activate the cell — the frontier sleeps
   instead of churning the budget dry.
-- **World hooks.** `world.onVoxelChanged(x, y, z, material)` fires
-  after every successful `setVoxel` (edits, undo/redo, sim writes):
+- **World hooks.** `world.onVoxelChanged(x, y, z, material, previous)`
+  fires after every successful `setVoxel` (edits, undo/redo, sim writes;
+  the Phase 11 `previous` argument tells the structural sim whether solid
+  matter vanished):
   FluidSim drops the level when a cell stops being water
   (displacement/vaporization) and wakes the neighborhood.
   `world.onChunkReady(chunk)` fires at the end of `ensureChunk` and
@@ -262,11 +253,70 @@ over accuracy — there is no temperature field or oxygen meter.
 - **Interactions.** Fire ↔ water is milestone 8: adjacent water
   extinguishes and survives; fluid flow into a burning cell (or a
   player's water dump) kills it through the same hook. Burn-out holes
-  are journaled edits — but they do NOT trigger the support check yet
-  (a burned pillar won't collapse its roof until Phase 11's structural
-  graph replaces the edit-time approximation).
+  are journaled edits and — since Phase 11 — undermine structures like
+  any removal: a burned pillar drops its roof through the structural
+  sim.
 - **HUD/inspector.** A `· fire N` counter appears while anything burns;
   the voxel inspector shows `burning <fuel>` for a burning cell.
+
+## Structural simulation (Phase 11)
+
+`src/voxel/structure.ts` replaces the Phase 8 edit-time support
+approximation with a ticked, budgeted sim over a graph of solid cells
+(believability over correctness, plan §26/§109).
+
+- **Nodes and connections.** Nodes are solid cells in the scan region;
+  connections are 6-neighbor adjacencies. Vertical connections always
+  transmit support; horizontal ones transmit it only within
+  `MAX_CANTILEVER` (6) consecutive groundless hops.
+- **Support analysis** is a 0/1-cost BFS from anchors — the bedrock
+  layer plus the region's horizontal boundary, which is assumed to
+  continue into grounded terrain. Stepping onto a cell with solid
+  ground below is free; stepping onto one hanging in the air costs 1.
+  Cells no path reaches (cost 255) are unsupported. This makes floors
+  hold from their walls, plank bridges stand within ~6 of a shore, and
+  a roof whose last pillar is gone fall entirely; overhangs past the
+  limit drop only their far half (partial cantilever collapse).
+- **Stress** is vertical stack load: a cell carries one mass unit for
+  itself plus everything solid above it in its column. `strengthOf` (a
+  derived `MATERIAL_STRENGTH` balance table) is the fracture threshold.
+  Only cells with journaled edits are stress-eligible — natural terrain
+  is assumed at rest, so cliffs and mountains never avalanche — while
+  load itself counts all overlying mass, so a wood post propping up a
+  stone overhang still fails. Disturbing the ground next to a
+  23+-tall wood tower fractures its base, and the upper tower then
+  cascades down on the next tick.
+- **`StructuralSim`** (ticked like fluid/fire): chains onto the World's
+  `onVoxelChanged` hook — which now also carries the cell's previous
+  material — and queues a region scan only when **solid matter
+  vanished** (tool removal, brush delete, cut, explosion, collapse,
+  fire burn-out). Placements and water flow never trigger an analysis:
+  building stays Minecraft-style free, and re-placed structures are
+  trusted until disturbed. Pending regions merge; one analysis runs per
+  fixed step (game budget: `STRUCTURE_ANALYSES_PER_TICK = 1`); regions
+  above `STRUCTURE_SCAN_BUDGET` (150k cells) are skipped, and single
+  collapses cap at `MAX_COLLAPSE_CELLS` (4096) with the rest left to
+  the cascade.
+- **Regions scan the full world height** (32 rows) but only ±12
+  horizontally: loads are column stacks, so a cut-off top would
+  undercount them. The snapshot iterates chunk-by-chunk (missing chunks
+  read as air; each chunk's edit journal is consulted once, not per
+  cell) into flat `solid`/`meta` byte buffers, so every later pass runs
+  allocation-free over typed arrays.
+- **Collapse flow.** The sim _proposes_ failing cells through
+  `onCollapse`; the game layer applies them as one grouped undoable
+  `collapse` command with debris/dust/sound (`structureCollapsed` on
+  the bus), exactly like a tool edit. Applying the edits re-queues the
+  region, so multi-stage failures cascade across ticks — staged,
+  bounded, and undoable.
+- **Fire coupling** (the deferred Phase 10 item) falls out of the hook:
+  burn-out is a real `setVoxel(AIR)` write, so a burned-through pillar
+  drops its roof with no special-case code.
+- **Debug overlay** (`src/render/structureViz.ts`, toggled with G):
+  flashes the failed cells of each collapse — red for lost support,
+  orange for stress fractures — for ~1.6 s so the _reason_ a structure
+  fell stays readable after the fact. One pooled InstancedMesh, same
+  discipline as debris/dust.
 
 ## Chunk meshing and streaming
 
@@ -368,9 +418,12 @@ depth write so lake beds stay visible.
   walls, sliding, step climbing), creator (brush shapes/tools/bedrock/
   guards, selection budget, clipboard transform round-trips, prefab
   validation, corrupt-prefab handling), destruction (damage falloff by
-  hardness, bedrock/water immunity, determinism, debris caps, support
-  fixtures: pillar-roof collapse, boundary anchoring, budget skip,
-  event-bus delivery, and the 100-event debris-pool stress test), fire
+  hardness, bedrock/water immunity, determinism, debris caps,
+  event-bus delivery, and the 100-event debris-pool stress test),
+  structure (support/cantilever fixtures incl. pillar-roof collapse,
+  boundary anchoring, budget skip, stress thresholds + terrain
+  exemption, progressive cascade, region merging + truncation,
+  determinism, fire→collapse coupling, edit-journal contract), fire
   (ignition rules, spread, exact burn durations, water coupling,
   smothering, blast heat, budget, sleep/wake, determinism, journal
   interplay).
@@ -379,7 +432,9 @@ depth write so lake beds stay visible.
   packed), `benchmarks/terrain.bench.ts`, `benchmarks/destruction.bench.ts`
   (blast fields, support checks), `benchmarks/fluid.bench.ts` (budget
   tick, flood scenarios), `benchmarks/fire.bench.ts` (budget tick, fire
-  front, full burn-out scenario). Baselines in `docs/performance.md`.
+  front, full burn-out scenario), `benchmarks/structure.bench.ts`
+  (house-scale gate, worst-case solid region, overstress tower, full
+  collapse cascade). Baselines in `docs/performance.md`.
 - Headless GUI verification: `.verify/run.mjs` (local, gitignored)
   drives the real game in Playwright Chromium through the dev-only
   `__mw` hook — pointer lock, brush strokes, selection/clipboard/

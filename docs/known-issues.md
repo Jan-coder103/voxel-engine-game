@@ -70,18 +70,14 @@ milestone goes here before it goes to the backlog.
 
 ## Destruction (Phase 8)
 
-- **Support anchoring is a local approximation.** `checkSupport` scans a
-  bounded region (edit bounds ±12, full height) and treats cells at the
-  region's horizontal edge as grounded. Structures wider/taller than the
-  scan region can be mis-judged: a cut-off top may collapse (believable),
-  and a component touching the scan edge stays standing even if floating.
-  The Phase 11 structural graph replaces this.
-- **Support check cost is bounded but real.** Snapshot + flat-index BFS
-  over the region: ~10 ms worst case for a fully-solid house-scale
-  region (was 18.5 ms before the snapshot pass and the World chunk
-  memo). It runs synchronously after destructive edits; a frame spike on
-  huge edits is possible. Regions above 150k cells are skipped entirely
-  (`checked: false`).
+- **Structural anchoring is still a local approximation (now by
+  design).** The Phase 11 analysis scans ±12 cells horizontally around
+  the disturbance (full height) and treats solid cells at the region's
+  horizontal edge as grounded: a component touching the scan edge stays
+  standing even if truly floating. Structures wider than ~24 voxels
+  across a disturbance can be mis-judged at the fringes. (Phase 11's
+  cantilever/stress model replaced the Phase 8 flood fill; see the
+  Structures section below.)
 - **Debris is visual, not material.** Collapsed voxels become pooled
   InstancedMesh boxes that bounce, settle, and shrink away — they do not
   re-materialize as voxels where they land (undo is the restoration
@@ -107,10 +103,10 @@ milestone goes here before it goes to the backlog.
   with no active fire. The _consequences_ persist — burn-out holes are
   real journaled edits. If persistence is ever wanted: a v3 section
   mirroring `waterLevels`, plus a fire→v3 migration.
-- **Burn-out does not trigger the support check.** A burned-through
-  pillar leaves its roof floating until the next edit near it runs the
-  check. Structural response to fire arrives with Phase 11's structural
-  graph (replacing the edit-time support approximation), per plan.
+- **Burn-out triggers structural analysis.** Since Phase 11 a
+  burned-through pillar drops its roof (the collapse is undoable, the
+  burn-out holes are journaled). Resolved — listed here because older
+  session notes say otherwise.
 - **No wind, no rain coupling.** The Phase 10 checklist items are
   deferred until a weather system exists (Phase 15/16); fire currently
   spreads isotropically via 6-neighbor heat.
@@ -129,6 +125,45 @@ milestone goes here before it goes to the backlog.
 - **Fire is creator-mode-only to start.** The ignite tool and the
   explosion (heat) path are creator gestures; there is no natural
   ignition (lightning, lava) yet.
+
+## Structures (Phase 11)
+
+- **No lateral load distribution.** Stress is vertical stack load only:
+  a wide roof's weight does not pile onto its pillars (each column
+  carries just its own stack), so spanning structures are held or
+  dropped purely by the cantilever rule, not by load math. A real
+  "slab overload" model needs support-share distribution — a later
+  pass if the feel demands it.
+- **Cantilever support is a tuned constant** (`MAX_CANTILEVER = 6`
+  groundless hops). Rooms up to ~12 voxels across hold their floors
+  from the walls; longer spans need a mid pier or drop when disturbed.
+  This replaces Minecraft's "everything floats forever" with something
+  stricter — building a 20-plank bridge out from a shore will drop its
+  far half on the next nearby disturbance.
+- **Placements never trigger structural analysis.** Only removals
+  (tools, explosions, collapse, fire burn-out) queue regions: building
+  stays Minecraft-style free, floating builds stand until something is
+  disturbed nearby, and undoing a collapse re-materializes the roof
+  without a re-check. Deliberate trade — otherwise mid-build bridges
+  would collapse under the builder.
+- **Stress exempts natural terrain.** Only cells with journaled edits
+  can fracture under load (a generator-written 30-tall stone cliff is
+  "at rest"); load still counts all overlying mass, so propping up
+  terrain with wood posts fails believably. Quirk: a cell you merely
+  painted counts as "disturbed" and can then fracture.
+- **Collapse caps.** One analysis removes at most 4096 cells
+  (`MAX_COLLAPSE_CELLS`); bigger failures truncate and finish via the
+  cascade (next ticks). Regions above 150k cells skip analysis
+  entirely. Pending regions fold into one box past 32 entries (then
+  likely exceed the scan budget and skip — same graceful degradation
+  as before).
+- **Detached pieces go through the debris pipeline**, not a rigid-body
+  engine: pooled visual chunks with gravity/bounce (Rapier stays
+  deferred, per the Phase 8 note). Collapsed cells do not re-materialize
+  where they land; undo is the restoration path.
+- **Structural analyses cost a few ms each** (house-scale ≈ 2 ms on the
+  dev VM; see `docs/performance.md`) and run at most one per fixed step
+  — a large multi-stage collapse spreads across ticks by design.
 
 ## GUI verification (headless)
 

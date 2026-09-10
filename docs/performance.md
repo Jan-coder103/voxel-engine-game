@@ -4,6 +4,12 @@ Targets and budgets are defined in `MICRO_WORLD_DEVELOPMENT_PLAN.md`
 §2 (mid-range desktop, 2024+). This file tracks how we measure and the
 current baselines. Measure, don't guess: `npm run bench`.
 
+> **Machine caveat:** current baselines are measured on a 2-core /
+> 4 GB Lubuntu VM (with dev-server + browser sharing those cores during
+> verification runs) — treat them as upper bounds; real desktop
+> hardware lands comfortably faster. Cross-machine comparisons stay
+> noise until the Phase 23 benchmark serialization exists.
+
 ## How to benchmark
 
 ```sh
@@ -71,6 +77,31 @@ meshing stays mesh-bound — a greedy mesh through `PackedVolume`
 
 Generation remains an order of magnitude cheaper than meshing.
 
+## Baselines — structure (`benchmarks/structure.bench.ts`)
+
+2026-09-10, same VM (idle). The gate: one analysis after a house-scale
+edit must stay under 5 ms (plan §109) on real terrain, including the
+full-height column scan. Note the first implementation measured 9.6 ms
+and the fully-solid case 19 ms — the fix was mechanical: the hot passes
+now read a precomputed `solid` byte buffer instead of calling through
+material helpers (which under vitest's module transform turn imported
+constants into namespace lookups), and the snapshot consults each
+chunk's edit journal once instead of per cell.
+
+| Scene                                                     | ≈ time/op                     |
+| --------------------------------------------------------- | ----------------------------- |
+| **GATE** — house-scale analysis, real terrain (25×32×25)  | **2.19 ms** mean, p75 1.96 ms |
+| worst case — fully solid stone region (every cell BFS)    | 3.02 ms mean, p75 3.00 ms     |
+| large brush-delete region, real terrain (41×32×41, 54k)   | 4.77 ms mean, p75 4.60 ms     |
+| overstress analysis — 24-tall wood tower on terrain       | 1.94 ms mean, p75 1.86 ms     |
+| scenario — knock out a pillar → full cascade to rest      | ≈ 7.5 ms **total** over ~16 ticks (one analysis ≤ ~3 ms per fixed step) |
+
+Reading: the sim runs at most one analysis per fixed step, so even a
+multi-stage collapse costs one budgeted slice per tick; the 5 ms gate
+holds with headroom on this VM alone. Regions above 150k cells skip
+analysis entirely, and single collapses cap at 4096 cells (the cascade
+finishes the rest across subsequent ticks).
+
 ## Baselines — destruction (`benchmarks/destruction.bench.ts`)
 
 2026-09-09, same machine (worst case: fully-solid stone world, i.e.
@@ -78,20 +109,18 @@ every scanned cell is real work):
 
 | Scene                                         | ≈ time/op |
 | --------------------------------------------- | --------- |
-| explode r=6 in solid stone                    | ~4.5 ms   |
-| explode r=10 in solid stone (creator max)     | ~6.6 ms   |
-| support check — house-scale region (25×37×25) | ~10 ms    |
-| support check — supported terrain region      | ~14 ms    |
+| explode r=6 in solid stone                    | ~5.0 ms   |
+| explode r=10 in solid stone (creator max)     | ~6.8 ms   |
+| support analysis — house-scale region (fully solid) | ~7.5 ms |
+| support analysis — supported region (fully solid)   | ~8.7 ms |
 
-Reading: an explosion click costs ~5 ms of damage-field + debris-spec
-computation, and the follow-up support check ~10–14 ms — together a
-single-frame spike within the 16.6 ms budget, once per edit (not per
-frame). The support check originally measured 18.5 ms; the fix was
-structural: snapshot the region's solidity with one world query per
-cell (the `World` one-slot chunk memo removes most map lookups on the
-x-fastest scan), then BFS over the flat buffer with inline index math
-and zero per-cell allocations. Regions above 150k cells skip the check
-entirely (budgeted, reported as `checked: false`).
+The last two rows now run the Phase 11 `analyzeStructure` over the
+same regions (old checkSupport: ~10/14 ms). They are the pessimistic
+variant of the structure baselines above — the fully-solid synthetic
+world maximizes BFS work, and the blast-created walls journal their
+chunks, so the snapshot pays a journal probe per solid cell. In-game
+regions (real terrain, few edited chunks) measure 2–5 ms — see
+`benchmarks/structure.bench.ts`. Blast-field costs are unchanged.
 
 Debris/dust stepping is pool-bounded by construction: 512 debris +
 1024 dust instances in two InstancedMeshes, updated in ~0.1 ms per
@@ -149,9 +178,11 @@ class as debris/dust: 256 embers + 512 smoke instances, capped emission).
   a single edit remeshes 1–2 chunks).
 - LOD1 switches remesh within the same budget; transitions are not
   perceptible as hitches.
-- Explosions/collapses (Phase 8) add a one-frame ~15 ms CPU spike for
-  the damage field + support check at house scale; debris/dust then
-  cost a fixed, pool-bounded step per frame. Headless verification
+- Explosions (Phase 8) add a one-frame ~5–7 ms CPU spike for the damage
+  field + debris specs; the structural response (Phase 11) is one
+  budgeted analysis (~2–3 ms at house scale) per fixed step afterward,
+  with staged collapses spread across ticks. Debris/dust/structure-viz
+  then cost fixed, pool-bounded steps per frame. Headless verification
   (software WebGL) held ~12–17 fps with 200+ active debris pieces —
   the cap holds the floor; on real hardware the render path is GPU-bound.
 

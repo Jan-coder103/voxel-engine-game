@@ -110,6 +110,30 @@ export function fireProfileOf(id: VoxelMaterialID): FireProfile {
   return MATERIAL_FIRE[id] ?? FIREPROOF;
 }
 
+/**
+ * Structural load capacity (Phase 11): how much stacked mass (in voxels)
+ * a cell of this material can carry before it fractures. A derived
+ * balance table like MATERIAL_HARDNESS/MATERIAL_FIRE — not serialized.
+ *
+ * The world is 32 voxels tall, so these thresholds sit deliberately
+ * below build height: a wood column of 23+ collapses when disturbed,
+ * dirt/sand/grass much sooner, stone effectively never (it is as strong
+ * as the world is tall). Natural terrain never trips these values
+ * anyway — the structural sim only stresses cells with journaled edits
+ * (see src/voxel/structure.ts).
+ */
+const MATERIAL_STRENGTH: Readonly<Record<number, number>> = {
+  [GRASS]: 14,
+  [DIRT]: 16,
+  [SAND]: 10,
+  [STONE]: 26,
+  [WOOD]: 22,
+};
+
+export function strengthOf(id: VoxelMaterialID): number {
+  return MATERIAL_STRENGTH[id] ?? 18;
+}
+
 /** Bump when the serialized table layout changes (not when entries are added). */
 export const MATERIAL_FORMAT_VERSION = 1;
 

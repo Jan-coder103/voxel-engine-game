@@ -31,23 +31,98 @@
 
 ## Overall Phase
 
-**Current phase:** Phase 10 (Fire and Smoke) — **complete and committed** (implementation, verification, docs)
+**Current phase:** Phase 11 (Structural Simulation) — **complete and committed** (implementation, verification, docs)
 
-**Current milestone:** Milestones 1–7 met plus Milestone 8: "Fire and water interact" — ignition/spread/burn-out, water extinguishing (both directions), explosion heat coupling, ember/smoke rendering all verified.
+**Current milestone:** Milestones 1–8 met plus Milestone 9: "Buildings can collapse" — cantilever-aware support graph, simplified stress with failure thresholds, progressive cascading collapse, fire→collapse coupling, structural debug overlay, all gate criteria verified.
 
-**Overall completion:** ~45% (Phases 0–10 done; deferred fire sub-items: wind/rain coupling (needs weather), fire persistence in saves, fire→structural collapse coupling (Phase 11), volumetric smoke, sustained fire audio)
+**Overall completion:** ~50% (Phases 0–11 done; deferred: lateral load distribution (roof weight piling onto pillars), rigid-body engine for detached pieces (debris pipeline covers the feel), wind/rain coupling (needs weather), fire persistence in saves, volumetric smoke, sustained fire audio)
 
-**Last completed task:** Session 006 (2026-09-10) — implemented Phase 10: pure `FireSim` in `src/voxel/fire.ts` following the fluid pattern (fuel counters + integer heat accumulator, `MATERIAL_FIRE` derived table, budgeted 256-cell ticks, sleep/wake, deterministic); water extinguishing + full-enclosure smothering; burn-out through `World.setVoxel` (journaled, persists); ignite tool (6th brush tool) + explosion heat coupling (`explode()` returns `heated` crater-rim cells); `fireIgnited`/`fireExtinguished` events; pooled ember + smoke particles (`src/render/firefx.ts`); HUD counter + inspector fuel; 22 fire tests (262 total); fire benchmark baselines (budget tick 1.68 ms); headless browser verification — 13-check fire scenario all green (tool click ignition, containment, spread, burn-out, quiescence, water dousing); also fixed a real FireFx bug caught by the harness (unfilled particle state arrays crashed the frame loop — probe-verified, zero page errors after).
+**Last completed task:** Session 007 (2026-09-10) — implemented Phase 11: `StructuralSim` in `src/voxel/structure.ts` replacing the Phase 8 edit-time `checkSupport` (deleted): 0/1-cost cantilever support BFS over solid cells (vertical free, groundless horizontal hops cost 1, `MAX_CANTILEVER = 6`), vertical stack-load stress vs the new `MATERIAL_STRENGTH` table with journaled-cell-only eligibility (natural terrain exempt), progressive cascading collapse as grouped undoable commands (4096-cell cap, cascade finishes), 150k-cell region budget with full-height column scans, chunk-block snapshot with per-chunk journal lookups and a precomputed solidity buffer (hot passes call nothing); `World.onVoxelChanged` gained the `previous` material so only support-losing transitions queue analyses (placements/water never do); fire burn-out collapses structures automatically (the Phase 10 deferred coupling); `StructureViz` debug overlay (G) + HUD pending counter; 24 structure tests (278 total); benchmark gate 2.19 ms house-scale on real terrain (< 5 ms budget); headless browser Phase 11 section all green.
 
 **Current task:** None — session complete, work committed.
 
 **Blocked by:** Nothing.
 
-**Next recommended action:** **Phase 11 (Structural Simulation)** per the plan: real support graph replacing the Phase 8 edit-time support-check approximation; its checklist includes the collapse gate (destroy ground floor → upper floors fall as rigid bodies), incremental analysis (< 5 ms for house scale), and the fire→collapse coupling deferred from Phase 10.
+**Next recommended action:** **Phase 12 (NPCs)** per the plan: entity definition, transform/health/needs, wander + schedule behavior, then navigation (walkable cells → graph → A*) with local invalidation on edits. The event bus already carries everything NPCs will react to (explosions, collapses, fire).
 
 ---
 
 # Session Log
+
+## Session 007 — 2026-09-10
+
+**Status:** Complete — Phase 11 (Structural Simulation) done, verified, documented, committed. Milestone 9 met.
+
+### Completed
+
+- [x] Pure structural core (`src/voxel/structure.ts`), replacing the Phase 8 edit-time `checkSupport` (module deleted): `analyzeStructure(world, region)` over a graph of solid cells — vertical connections transmit support freely, horizontal ones only within `MAX_CANTILEVER = 6` consecutive groundless hops (0/1-cost BFS from bedrock + region-edge anchors, improvement-based re-pushes, (flat, cost) packed into one Int32Array).
+- [x] Simplified stress: vertical stack load (1 + everything solid above in the column) vs `strengthOf` (new derived `MATERIAL_STRENGTH` table in materials.ts: wood 22, stone 26, dirt 16, sand 10, grass 14). Stress-eligibility requires a journaled edit (`World.isEdited` — natural terrain is "at rest" and never avalanches); load counts all overlying mass, so wood posts propping terrain still fail believably.
+- [x] `StructuralSim` (ticked like fluid/fire): chains onto `World.onVoxelChanged` — which now also carries the cell's **previous** material — and queues a merged region scan only when solid matter vanished (tool removal, brush delete, cut, explosion, collapse, fire burn-out). Placements and water flow never trigger; building stays Minecraft-free. One analysis per fixed step (`STRUCTURE_ANALYSES_PER_TICK = 1`); pending regions merge with a 32-box fold cap; regions > 150k cells skip (`checked: false`).
+- [x] Regions scan the **full world height** (32 rows) ± 12 horizontally — a cut-off top undercounts column loads (found by a failing test: a ground-level dig next to a 23-tall tower missed the tower top).
+- [x] Collapse flow: the sim *proposes* failing cells via `onCollapse`; main applies them exactly like before — one grouped undoable `collapse` command, debris specs captured pre-edit, dust, `structureCollapsed` event, thud. The applied edits re-queue the region → **progressive cascading collapse** across ticks. `MAX_COLLAPSE_CELLS = 4096` truncates single collapses; the cascade finishes the rest.
+- [x] Fire → structure coupling (the Phase 10 deferred item) falls out of the hook: burn-out is a real `setVoxel(AIR)` write, so a burned pillar drops its roof — no special-case code.
+- [x] Performance: snapshot iterates chunk-by-chunk (missing chunks = air, journal consulted once per chunk), hot passes read a precomputed `solid` byte buffer (no function calls — vitest's module transform turns imported material constants into namespace lookups; the naive version measured 9.6 ms where the fixed one measures 2.2 ms).
+- [x] `src/render/structureViz.ts` (G toggle): pooled InstancedMesh flashing failed cells ~1.6 s — red = lost support, orange = stress fracture. HUD `· struct qN` while regions pending; `structure`/`structureViz` exposed on `__mw`; `structure.reset()` on load.
+- [x] Tests: `tests/structure.test.ts` — 24 tests (278 total): ported support fixtures (updated for cantilever semantics: one standing pillar now holds only the near roof — 26 of 65 cells fall), bridge limit boundary (6 holds, 7 drops the tip), stress threshold (23-tall wood tower fractures exactly at the base cell), natural-terrain exemption, propped-overhang failure, two-stage cascade, sim queueing rules (placement/water never queue), region merging, truncation + cascade completion, determinism across worlds, reset, fire→collapse coupling, `isEdited` contract. `tests/support.test.ts` deleted.
+- [x] Benchmarks (`benchmarks/structure.bench.ts`): **GATE 2.19 ms** house-scale on real terrain (budget < 5 ms), fully-solid worst case 3.18 ms, 54k-cell brush region 4.84 ms, tower overstress 2.15 ms, full collapse cascade ≈ 6.9 ms spread over ~16 ticks. Destruction bench's support rows ported to `analyzeStructure`. Baselines in `docs/performance.md`.
+- [x] Gates green: typecheck (strict), lint, build, Prettier, full suite **278 tests**.
+- [x] Headless browser verification (Playwright + SwiftShader): new Phase 11 section on `?seed=9999` — **all green, zero page errors**: cantilever gate (west pillar out → far roof half drops, near half stands), sim collapse counter, 24-tall wood tower stress fracture + cascade flat, fire burn-out drops a pillar-carried roof (fire fast-forwarded in-page), G overlay toggle + HUD flag. Existing Phase 7–10 sections still pass (incl. the Phase 8 collapse gate + undo, which now flows through the ticked sim).
+- [x] Docs: architecture "Structural simulation (Phase 11)" section (+ fire coupling note, hooks signature, layering, testing/benchmark lists), performance structure baselines + VM caveat, known-issues new Structures section (6 entries) + updated destruction/fire bullets, README (state, controls, layout), CHANGELOG `[0.9.0]`, this file.
+
+### Fixed during verification
+
+- **Harness run polluted by concurrent repo edits**: running `npm run format` while the suite was open triggered a Vite full reload mid-section — `window.__mw` vanished and the script crashed at the next evaluate (the earlier sections' flaky key-drops in that run were the same reload). Rule: **the dev server is idle while `.verify/run.mjs` runs** — no src edits, no formatters. Re-run after the change was clean.
+- **Full-height regions**: the first cut scanned affected.y + 12 upward; a ground-level disturbance next to a tall tower undercounted its load (test caught it). Regions now always span y 0..31 — cheap at WORLD_HEIGHT 32 and removes the cut-off-top class of bugs.
+- Two harness fixture bugs of my own making (single-block "pillars" not touching the roof; a 6-apart pillar pair whose far mid is exactly at the cantilever limit and correctly holds) — both caught by thinking through the cost math before re-running.
+
+### Verification lessons (for future sessions)
+
+- `node --check .verify/run.mjs` before any harness run catches top-level identifier collisions between phase sections instantly (this session: `roofY`, `lit` — Phase 8/10 already used them).
+- Vitest-bench numbers on this VM are only comparable between idle runs; the browser harness competes for the same 2 cores (one polluted re-run showed ±70% RME).
+- Under vitest, hot loops must not touch imported bindings through helper functions — hoist a local typed buffer (the `solid` array) instead. 4× on this machine, bigger on real hardware.
+
+### Deferred deliberately
+
+- Lateral load distribution (roof weight piling onto pillars / slab-overload failure) — stress is vertical-stack only; the cantilever rule carries spans. Tracked in known-issues.
+- Rigid-body engine (Rapier) for detached pieces — the pooled debris pipeline carries the feel; re-evaluate when debris needs true collisions.
+- Structural state in saves (collapses already persist via the journal; the sim is stateless between edits by design).
+- Partial-region edge anchoring (components touching the scan edge stay standing) — unchanged Phase 8 approximation, documented.
+- Manual GUI pass for Phase 7–11 polish (user); Phase 7/8 synthetic-input races remain harness-side.
+
+### Tests
+
+- Unit tests: 278 passed (23 files; +24 structure, −8 superseded support)
+- Integration: headless browser suite incl. 8-check Phase 11 structural scenario (all green); manual GUI pass pending (user)
+- Typecheck: clean (strict) · Lint: clean · Build: succeeds (three.js chunk unchanged)
+
+### Benchmarks
+
+- Structure: GATE 2.19 ms house-scale (p75 2.05), solid worst case 3.18 ms, 54k brush region 4.84 ms, cascade ≈ 6.9 ms over ~16 ticks — `docs/performance.md`
+- FPS: unchanged at idle (the sim sleeps with empty pending queue)
+
+### Architecture changes
+
+- New: `src/voxel/structure.ts` (pure), `src/render/structureViz.ts` (pools). Deleted: `src/voxel/support.ts`.
+- `World.onVoxelChanged` signature: `(x, y, z, material, previous)` (fluid/fire forward it; behavior unchanged). `World.isEdited`/`journalFor` added.
+- `MATERIAL_STRENGTH` derived table next to `MATERIAL_HARDNESS`/`MATERIAL_FIRE` (not serialized).
+- Layering unchanged: structure is pure; the game layer applies collapses as undoable edits.
+
+### Known issues
+
+- `docs/known-issues.md`: new Structures section (no lateral load distribution, cantilever constant, placements trusted, journal-exemption quirk, collapse caps, debris-not-bodies, per-tick analysis budget).
+
+### Next task
+
+- Task: Phase 12 — NPCs (entity, needs, wander/schedule, navigation)
+
+### Recommended next steps
+
+1. Pure NPC core in `src/sim/` or `src/npc/` (no three.js): entity state (position, velocity, needs, simple schedule), fixed-step tick, spawn/despawn by simulation distance.
+2. Navigation first pass: walkable-cell queries off the voxel grid + A* over a local region with local invalidation on `structureCollapsed`/edit events (the plan §40 shape).
+3. Behavior: wander + flee — subscribe to `structureCollapsed`/`fireIgnited`/`explosion` on the bus; render-side: simple instanced capsule/box figures (`src/render/`), one InstancedMesh for all NPCs.
+4. Keep determinism: NPC ticks join the fixed step; no RNG without a seeded source.
+
+---
 
 ## Session 006 — 2026-09-10
 
@@ -895,21 +970,21 @@ pickup instructions in `HANDOFF.md`.
 
 # Phase 11 — Structural Simulation
 
-- [ ] Define structural node
-- [ ] Define structural connection
-- [ ] Build support graph
-- [ ] Detect unsupported components
-- [ ] Calculate simplified stress
-- [ ] Add failure thresholds
-- [ ] Detach unstable components
-- [ ] Convert detached pieces to rigid bodies
-- [ ] Add structural debug visualization
-- [ ] Add collapse benchmark
-- [ ] Test large building collapse
+- [x] Define structural node _(a solid cell in the scan region)_
+- [x] Define structural connection _(6-neighbor adjacency: vertical always transmits, horizontal within `MAX_CANTILEVER = 6` groundless hops)_
+- [x] Build support graph _(0/1-cost BFS from bedrock + region-edge anchors; rebuilt locally per analysis — incremental by region, not by persistent graph state)_
+- [x] Detect unsupported components _(cost 255 = no support path → collapse)_
+- [x] Calculate simplified stress _(vertical stack load: 1 + all solid above in the column)_
+- [x] Add failure thresholds _(`strengthOf` — derived `MATERIAL_STRENGTH` table; journaled cells only, so natural terrain is exempt)_
+- [x] Detach unstable components _(failing cells → AIR as one grouped undoable command; the edit re-queues the region → progressive cascade)_
+- [x] Convert detached pieces to rigid bodies _(pooled debris pipeline with gravity/bounce — believable; Rapier deferred)_
+- [x] Add structural debug visualization _(`StructureViz`, G toggle: red = lost support, orange = stress fracture; HUD pending counter)_
+- [x] Add collapse benchmark _(benchmarks/structure.bench.ts: GATE 2.19 ms house-scale, worst-case solid 3.18 ms, cascade ≈ 6.9 ms over ~16 ticks)_
+- [x] Test large building collapse _(13×5 pavilion + 43×43×3 floating slab (5547 cells > 4096 cap, cascade finishes); 24-tall tower fracture + full cascade; 4096-cell truncation tested)_
 
 ### Milestone
 
-- [ ] **Milestone 9 complete: Buildings can collapse**
+- [x] **Milestone 9 complete: Buildings can collapse** _(met — the plan §109 gate holds end to end: destroying a building's ground floor detaches and drops the upper floors as debris that settles; analysis is budgeted and ticked at 2.19 ms house-scale (< 5 ms); believable over correct — no engineering accuracy claimed, limitations in docs/known-issues.md)_
 
 ---
 
@@ -1324,7 +1399,10 @@ Only after core deterministic simulation is stable.
 - [x] Clipboard transforms round-trip _(rotate ×4 = identity, mirror involution — tests/creatorClipboard.test.ts, Session 004)_
 - [x] Prefab serialization round-trip _(incl. RLE, corrupt JSON, version drift — tests/creatorPrefab.test.ts, Session 004)_
 - [x] Blast determinism _(same seed → identical debris; bedrock/water immunity — tests/damage.test.ts, Session 004)_
-- [x] Unsupported structures do not remain stable _(pillar-roof collapse fixture — tests/support.test.ts, Session 004)_
+- [x] Unsupported structures do not remain stable _(pillar-roof collapse fixture — tests/structure.test.ts, Sessions 004+007)_
+- [x] Structural analysis is deterministic _(identical worlds + trigger → identical collapse lists — tests/structure.test.ts, Session 007)_
+- [x] Natural terrain never avalanches from stress _(generator-written cells are stress-exempt — tests/structure.test.ts, Session 007)_
+- [x] Burned-through structures collapse _(fire → structure coupling — tests/structure.test.ts, Session 007)_
 
 ## Simulation invariants
 
@@ -1366,7 +1444,7 @@ Only after core deterministic simulation is stable.
 - [x] Physics _(player controller notes in architecture — Player physics section)_
 - [x] Fluids _(architecture "Water (Phase 9)" — sim, hooks, rendering, swim, save v2)_
 - [x] Fire _(architecture "Fire (Phase 10)" — cells/heat model, death rules, ignition paths, budget, rendering, interactions)_
-- [ ] Structures
+- [x] Structures _(architecture "Structural simulation (Phase 11)" — graph model, cantilever BFS, stress + journal exemption, ticked sim + budgets, collapse flow, fire coupling, viz)_
 - [ ] NPCs
 - [ ] Navigation
 - [ ] World generation
