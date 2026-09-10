@@ -29,7 +29,12 @@ function layeredVolume(size: number): VoxelVolume {
   for (let y = 0; y < size; y++)
     for (let z = 0; z < size; z++)
       for (let x = 0; x < size; x++) {
-        volume.set(x, y, z, y < 2 ? STONE : y < 5 ? (x + z) % 8 === 0 ? SAND : GRASS : y < 6 ? WATER : STONE);
+        volume.set(
+          x,
+          y,
+          z,
+          y < 2 ? STONE : y < 5 ? ((x + z) % 8 === 0 ? SAND : GRASS) : y < 6 ? WATER : STONE,
+        );
       }
   return volume;
 }

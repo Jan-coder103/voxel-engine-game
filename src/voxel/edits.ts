@@ -38,7 +38,11 @@ export const MAX_HISTORY = 128;
  * (unloaded chunks) is impossible by construction: failed cells are
  * skipped too, so the command is exactly what changed.
  */
-export function applyEdits(world: World, edits: readonly VoxelEdit[], label: string): EditCommand | undefined {
+export function applyEdits(
+  world: World,
+  edits: readonly VoxelEdit[],
+  label: string,
+): EditCommand | undefined {
   const applied: VoxelEdit[] = [];
   const previous: VoxelEdit[] = [];
   for (const edit of edits) {

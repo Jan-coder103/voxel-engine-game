@@ -301,8 +301,7 @@ describe('water (Phase 9)', () => {
         for (let y = 11; y <= 12; y++) volume.set(x, y, z, WATER); // surface at 13
       }
     // A stone deck at the far shore (top y=14, one above the surface).
-    for (let z = 15; z <= 17; z++)
-      for (let x = 20; x <= 23; x++) volume.set(x, 13, z, STONE);
+    for (let z = 15; z <= 17; z++) for (let x = 20; x <= 23; x++) volume.set(x, 13, z, STONE);
     const solid = (x: number, y: number, z: number) =>
       isSolidForCollision(volume.getOrAir(x, y, z));
     const waterAt = (x: number, y: number, z: number) =>

@@ -42,7 +42,18 @@ function unitFaceSet(mesh: ChunkMesh): Map<string, number> {
       const max = [Math.max(...xs), Math.max(...ys), Math.max(...zs)];
 
       // The face plane sits on the + side of the cells for dir +1.
-      const cellD = nx === 1 ? min[0] - 1 : ny === 1 ? min[1] - 1 : nz === 1 ? min[2] - 1 : nx === -1 ? min[0] : ny === -1 ? min[1] : min[2];
+      const cellD =
+        nx === 1
+          ? min[0] - 1
+          : ny === 1
+            ? min[1] - 1
+            : nz === 1
+              ? min[2] - 1
+              : nx === -1
+                ? min[0]
+                : ny === -1
+                  ? min[1]
+                  : min[2];
       for (let a = min[0]; a < (nx !== 0 ? min[0] + 1 : max[0]); a++) {
         for (let b = min[1]; b < (ny !== 0 ? min[1] + 1 : max[1]); b++) {
           for (let c = min[2]; c < (nz !== 0 ? min[2] + 1 : max[2]); c++) {
@@ -74,7 +85,11 @@ describe('meshVolumeGreedy — correctness', () => {
   it('matches the naive mesher on a single voxel', () => {
     const volume = new VoxelVolume(4);
     volume.set(1, 2, 1, STONE);
-    expectSameFaces(meshVolumeGreedy(volume, localQuery(volume)), meshVolume(volume, localQuery(volume)), 'single');
+    expectSameFaces(
+      meshVolumeGreedy(volume, localQuery(volume)),
+      meshVolume(volume, localQuery(volume)),
+      'single',
+    );
   });
 
   it('merges a solid volume to 6 quads (naive needs many more)', () => {
@@ -207,9 +222,10 @@ describe('meshVolumeGreedy — water flow height (Phase 9)', () => {
   it('sinks surfaced water top faces by (255 − level)/255 and keeps submerged full', () => {
     const volume = new VoxelVolume(4);
     // A full column (submerged except the top) plus a half-full puddle.
-    for (let y = 0; y < 3; y++) for (let z = 0; z < 2; z++) for (let x = 0; x < 2; x++) volume.set(x, y, z, WATER);
+    for (let y = 0; y < 3; y++)
+      for (let z = 0; z < 2; z++) for (let x = 0; x < 2; x++) volume.set(x, y, z, WATER);
     volume.set(2, 0, 0, WATER);
-    const level = (x: number, y: number, z: number) => (y === 0 && x === 2 ? 128 : 255);
+    const level = (x: number, y: number) => (y === 0 && x === 2 ? 128 : 255);
     const mesh = meshVolumeGreedy(volume, localQuery(volume), level);
     expect(mesh.water.waterDrop).toBeDefined();
 
@@ -234,7 +250,8 @@ describe('meshVolumeGreedy — water flow height (Phase 9)', () => {
     const columnTop = topFaces.find(([, y]) => y === 3)!;
     const puddleTop = topFaces.find(([, y]) => y === 1)!;
     expect(dropsAt(columnTop[0])).toEqual([0, 0, 0, 0]);
-    for (const d of dropsAt(puddleTop[0])) expect(Math.abs(d - expectedPuddleDrop)).toBeLessThan(1e-6);
+    for (const d of dropsAt(puddleTop[0]))
+      expect(Math.abs(d - expectedPuddleDrop)).toBeLessThan(1e-6);
 
     // Submerged cells (water above): no drop on their side faces either —
     // the column interior emits nothing; only the surface matters.
@@ -251,8 +268,7 @@ describe('meshVolumeGreedy — water flow height (Phase 9)', () => {
           const r = rng();
           volume.set(x, y, z, r < 0.3 ? STONE : r < 0.55 ? WATER : AIR);
         }
-    const level = (x: number, y: number, z: number) =>
-      Math.floor(hashish(x, y, z) * 255);
+    const level = (x: number, y: number, z: number) => Math.floor(hashish(x, y, z) * 255);
     const withLevels = meshVolumeGreedy(volume, localQuery(volume), level);
     const without = meshVolumeGreedy(volume, localQuery(volume));
     expectSameFaces(withLevels, without, 'levels do not change faces');

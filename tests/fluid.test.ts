@@ -14,8 +14,7 @@ import { worldToChunk, worldToLocal } from '../src/voxel/coordinates';
 function emptyWorld(): World {
   const world = new World(() => {});
   for (let cy = 0; cy < 2; cy++)
-    for (let cz = -1; cz <= 1; cz++)
-      for (let cx = -1; cx <= 1; cx++) world.ensureChunk(cx, cy, cz);
+    for (let cz = -1; cz <= 1; cz++) for (let cx = -1; cx <= 1; cx++) world.ensureChunk(cx, cy, cz);
   return world;
 }
 
@@ -127,7 +126,12 @@ describe('gravity and equalization', () => {
   it('falls straight down a 1×1 shaft without losing mass', () => {
     const world = emptyWorld();
     for (let y = 1; y <= 6; y++) {
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      for (const [dx, dz] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ] as const) {
         world.setVoxel(dx, y, dz, STONE);
       }
     }
@@ -157,7 +161,12 @@ describe('gravity and equalization', () => {
   it('a falling cell never becomes a source (254 cap)', () => {
     const world = emptyWorld();
     for (let y = 0; y <= 6; y++) {
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      for (const [dx, dz] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ] as const) {
         world.setVoxel(dx, y, dz, STONE);
       }
     }
@@ -243,6 +252,37 @@ describe('chunk boundaries', () => {
     world.setVoxel(16, 0, 0, STONE); // floor in the new chunk
     fluid.settle();
     expect(fluid.levelAt(16, 1, 0)).toBeGreaterThan(0);
+  });
+
+  it('a frontier source sleeps instead of re-activating forever (regression)', () => {
+    // The failing-write path must not re-activate the cell's neighborhood,
+    // or every lake at the streaming edge churns the budget dry forever.
+    const world = new World(() => {});
+    world.ensureChunk(0, 1, 0); // only the source's own layer exists
+    const fluid = new FluidSim(world);
+    placeSource(world, 15, 16, 0); // gravity target (15,15,0) is unloaded
+    fluid.settle();
+    expect(fluid.activeCount).toBe(0);
+    expect(fluid.levelAt(15, 16, 0)).toBe(255);
+
+    // Same contract horizontally: side neighbors in unloaded chunks.
+    const world2 = new World(() => {});
+    world2.ensureChunk(0, 0, 0);
+    const fluid2 = new FluidSim(world2);
+    world2.setVoxel(15, 0, 15, STONE); // floor
+    world2.setVoxel(14, 1, 15, STONE); // wall off the loaded -x side
+    placeSource(world2, 15, 1, 15); // +x and +z sides are unloaded
+    fluid2.settle();
+    expect(fluid2.activeCount).toBe(0);
+    expect(fluid2.levelAt(15, 1, 15)).toBe(255);
+    // and it still resumes when the world arrives
+    world2.ensureChunk(1, 0, 0);
+    world2.ensureChunk(0, 0, 1);
+    world2.setVoxel(16, 0, 15, STONE);
+    world2.setVoxel(15, 0, 16, STONE);
+    fluid2.settle();
+    expect(fluid2.levelAt(16, 1, 15)).toBeGreaterThan(0);
+    expect(fluid2.levelAt(15, 1, 16)).toBeGreaterThan(0);
   });
 });
 
@@ -372,7 +412,14 @@ describe('displacement and persistence', () => {
     const fluid = new FluidSim(world);
     // Entries 0/255/-1 are invalid (255 is the no-entry source default);
     // loadLevels skips them rather than fabricating flowing water.
-    fluid.loadLevels({ '0,0,0': [[volumeIndex(0, 0, 0), 0], [volumeIndex(1, 0, 0), 255], [volumeIndex(2, 0, 0), 254], [volumeIndex(3, 0, 0), -1]] });
+    fluid.loadLevels({
+      '0,0,0': [
+        [volumeIndex(0, 0, 0), 0],
+        [volumeIndex(1, 0, 0), 255],
+        [volumeIndex(2, 0, 0), 254],
+        [volumeIndex(3, 0, 0), -1],
+      ],
+    });
     for (const x of [0, 1, 2, 3]) world.setVoxel(x, 0, 0, WATER);
     expect(fluid.levelAt(0, 0, 0)).toBe(255); // no entry → source default
     expect(fluid.levelAt(1, 0, 0)).toBe(255);

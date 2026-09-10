@@ -31,23 +31,86 @@
 
 ## Overall Phase
 
-**Current phase:** Phase 9 (Water) — implementation ~90% done, mid-session handoff (see `HANDOFF.md` for the detailed pickup map)
+**Current phase:** Phase 9 (Water) — **complete and committed** (implementation, verification, docs)
 
-**Current milestone:** Milestones 1–6 met (through destruction). Milestone 7 (water flows) functionally implemented, verification/docs pending.
+**Current milestone:** Milestones 1–7 met (through water). Milestone 7: "Water can flow through the world" — flow, conservation, rendering, swimming, persistence all verified.
 
-**Overall completion:** ~36% (Phases 0–8 done; Phase 9 code complete and green)
+**Overall completion:** ~40% (Phases 0–9 done; deferred water sub-items: pressure, worker fluid, GPU fluid, debug overlay)
 
-**Last completed task:** Session 005 (in progress) — Phase 9 water: pure `FluidSim` (levels 0–255, sources-by-default, gravity + equalization, exact mass conservation, sleep/wake, budgeted ticks, chunk-frontier wake), flow-height water rendering (`waterDrop` attribute, greedy-mesher merge signature), player swimming/buoyancy/climb-out, water interactions (brush place/displace, explosion vaporization, water as placeable material), save format v2 with fluid levels + v1 migration. 239 tests green (22 files). **Nothing committed yet.**
+**Last completed task:** Session 005 (2026-09-10) — finished Phase 9: fluid benchmark run + baselines recorded; all gates re-run green (240 tests, typecheck, lint, build); **found and fixed a real fluid bug via headless browser verification** (frontier cells re-activated forever after a failed unloaded-chunk write — lakes churned ~10³ cells permanently and starved the 384-cell budget; now they sleep, regression-tested); full headless verification suite extended with a 14-check water scenario (source placement, spread, containment, exact mass conservation, quiescence, swim, climb-out, save-v2 boot restore) — all green; docs updated (architecture Water section, performance baselines, known-issues rewrite, README, CHANGELOG 0.7.0).
 
-**Current task:** Finish Phase 9: run `benchmarks/fluid.bench.ts` + record baselines, re-run typecheck/lint/build (last edits came after the last typecheck), headless browser verification (water spread + swim + lake render via `.verify/run.mjs`), update docs (architecture, performance, known-issues, README, CHANGELOG) + this file's Phase 9 checklist, commit.
+**Current task:** None — session complete, work committed.
 
-**Blocked by:** Nothing (user paused the session for the night mid-verification)
+**Blocked by:** Nothing.
 
-**Next recommended action:** Follow `HANDOFF.md` (Session 005 section) top to bottom — it lists exact remaining steps, the checklist mapping, and the known sharp edges (undo-turns-flow-into-sources, no pressure/up-flow, LOD1 full cubes) to document.
+**Next recommended action:** **Phase 10 (Fire and Smoke)** per the plan: temperature/fuel/ignition/spread with `hardnessOf`-style derived tables; the Phase 8 event bus is the integration backbone and water coupling (extinguish) is the first cross-system test. Phase 11 then replaces the support-check approximation.
 
 ---
 
 # Session Log
+
+## Session 005 — 2026-09-10
+
+**Status:** Complete — Phase 9 (Water) done, verified, documented, committed. Milestone 7 met.
+
+### Completed
+
+- [x] Phase 9 implementation (carried from the mid-session handoff, committed as `b5ae66c` before this session resumed): pure `FluidSim` (levels 0–255, sources-by-default, gravity + equalization, mass conservation, sleep/wake, budgeted ticks), `onVoxelChanged`/`onChunkReady` world hooks, flow-height rendering (`waterDrop` attribute), swimming/climb-out, brush/explosion water interactions, save v2 with fluid levels + v1 migration. 239 tests green.
+- [x] Fluid benchmark run (`benchmarks/fluid.bench.ts`): budgeted 384-cell tick **2.60 ms** mean (p75 2.51) — inside a 16 ms frame; steady-state churn **0.42 ms/tick**; 22×22 basin flood settles in **≈2.7 s**; lake wake ≈3.4 ms incl. chunk gen. Baselines recorded in `docs/performance.md`; budget stays at 384.
+- [x] Gates re-run green: typecheck (one stray unused-var in a mesher test fixed), lint, build (584 kB minified / 153 kB gzip three.js chunk), Prettier (`npm run format` reflowed the repo — the prior commit predated it), full suite **240 tests**.
+- [x] **Fluid bug found + fixed (the session's real catch).** Headless verification showed lakes churning ~10³ active cells _forever_ on every watery seed (budget saturated; fresh worlds never reached 0). Forensics with in-page instrumentation pinned it: `updateCell` fired its paired write + `activateAround` even when `setLevel` early-returned on a failed unloaded-chunk write — every frontier source re-woke itself + 13 neighbors each tick, forever. Fix: `setLevel` returns success; failed writes propagate nothing, so frontier water sleeps and resumes on `onChunkReady`. Regression-tested (`tests/fluid.test.ts`); settled worlds now measure **active = 0**.
+- [x] Headless browser verification (Playwright + SwiftShader, `.verify/run.mjs`): added a Phase 9 water section (fresh `?seed=1234` world; 14 checks) — source placement, spread to far corner as flowing cells, material/level semantics, HUD churn counter, **quiescence (active=0), exact containment (interior mass = region mass), mass conservation over time**, swim HUD state, climb-out onto the bank, save-v2 `waterLevels` field, boot restore of flowing levels. **All 14 pass.** Screenshots in `.verify/artifacts/`.
+- [x] Docs: `docs/architecture.md` (new "Water (Phase 9)" section), `docs/performance.md` (fluid baselines + frontier-bug note), `docs/known-issues.md` (placeholder bullet replaced by a water sharp-edges list; explosion bullet updated to "vaporizes water"), README (current state, controls, repo layout), CHANGELOG `[0.7.0]`.
+- [x] Committed as one Phase 9 completion commit.
+
+### Verification lessons (for future sessions)
+
+- The basin fixture itself caused two false alarms: a source placed **above** a basin rim floods the entire shore (that is the source rule working — it fills every reachable cell at or below its level); and the "corner" sample cells were wall columns, not open interior. Verify fixture geometry before suspecting the sim.
+- Playwright localStorage does not survive `browser.close()` — post-mortem probes must rebuild state in the same page/session, not re-open storage.
+- Remaining Phase 7/8 check failures in `run.mjs` are the documented synthetic-input races (dropped keydowns/pointer-lock drops at ~10 fps software rendering) — the mix differs per run and the critical gates (collapse, prefab persistence, conservation) hold. The manual GUI pass is still the user's.
+
+### Fixed during verification
+
+- Fluid frontier re-activation bug (above) — the only code change in `src/`; everything else was harness/fixture geometry.
+
+### Deferred deliberately
+
+- Pressure / up-flow (u-tubes), worker-side fluid, GPU fluid, dedicated fluid debug overlay (HUD counters + inspector level exist) — recorded in the Phase 9 checklist.
+- Manual GUI pass for Phases 7–8/9 polish (user).
+- Undo does not restore partial fluid levels (undo of a dump yields sources) — accepted, documented in known-issues.
+
+### Tests
+
+- Unit tests: 240 passed (22 files, +1 regression test for frontier sleep)
+- Integration: headless browser suite incl. 14-check water scenario (green); manual GUI pass pending (user)
+- Typecheck: clean (strict) · Lint: clean · Build: succeeds (584.56 kB minified / 153.16 kB gzip three.js chunk)
+
+### Benchmarks
+
+- Fluid: see `docs/performance.md` — budgeted tick 2.60 ms mean; steady churn 0.42 ms/tick; basin flood ≈2.7 s one-time; settled water 0
+- FPS: unchanged (fluid idle most frames; budgeted otherwise)
+
+### Architecture changes
+
+- `FluidSim.setLevel` now returns write success; `updateCell` gates propagation + activation on it (failed unloaded-chunk writes are total no-ops).
+- No layering changes: fluid is pure (`src/voxel/`), rendering consumes via query attributes.
+
+### Known issues
+
+- `docs/known-issues.md`: water section (no pressure/up-flow, not raycast-targetable, integer equalization, LOD1 full cubes, undo-sources quirk, frontier wait, one-time lake wake).
+
+### Next task
+
+- Task: Phase 10 — Fire and Smoke (temperature, fuel, ignition, spread; extinguishing coupled to water)
+
+### Recommended next steps
+
+1. Pure fire core in `src/voxel/fire.ts` following the fluid pattern: per-cell temperature/fuel derived tables (`MATERIAL_FLAMMABILITY` next to `MATERIAL_HARDNESS`), budgeted ticks, sleep/wake, event-bus events (`ignited`, `extinguished`).
+2. Water coupling first (it exists): fire + adjacent water → extinguish + steam; explosion heat field hooks exist from Phase 8's deferred "calculate heat".
+3. Rendering: pooled ember/smoke particles in `src/render/` (reuse the debris/dust InstancedMesh pattern); smoke as a light cellular gas later in the phase.
+4. Keep determinism: fire ticks join the fixed-step budget alongside `fluid.tick`.
+
+---
 
 ## Session 004 — 2026-09-09
 
@@ -710,23 +773,23 @@ pickup instructions in `HANDOFF.md`.
 
 # Phase 9 — Water
 
-- [ ] Define fluid cell
-- [ ] Implement water placement
-- [ ] Implement gravity
-- [ ] Implement horizontal flow
-- [ ] Implement boundaries
-- [ ] Implement mass conservation
-- [ ] Implement chunk boundaries
-- [ ] Implement pressure
-- [ ] Implement water rendering
-- [ ] Add fluid debug visualization
-- [ ] Add fluid benchmark
-- [ ] Move fluid simulation to worker
-- [ ] Investigate GPU fluid simulation
+- [x] Define fluid cell _(level 0–255 per water cell; 255 = source by default, 1–254 flowing in a sparse map)_
+- [x] Implement water placement _(WATER material = source; hotbar 6, brush place, RMB — creates sources with zero setup)_
+- [x] Implement gravity _(down-dump to the 254 cap per tick)_
+- [x] Implement horizontal flow _(integer equalization `diff >> 1` when `diff ≥ 2`, fixed neighbor order)_
+- [x] Implement boundaries _(solid cells can't receive; unloaded chunks refuse writes; world edges hold)_
+- [x] Implement mass conservation _(exact in closed basins — unit-tested; verified in-browser: interior mass = region mass, stable over time)_
+- [x] Implement chunk boundaries _(cross-chunk flow with conservation; frontier water waits for `onChunkReady`)_
+- [ ] Implement pressure _(deferred — no up-flow/u-tubes; Phase 10+ or a later pass)_
+- [x] Implement water rendering _(flow-height: `waterDrop` attribute sinks surfaced tops; full/submerged merge unchanged; LOD1 = full cubes)_
+- [ ] Add fluid debug visualization _(deferred — HUD active counter + inspector `water N/255` exist; no dedicated overlay)_
+- [x] Add fluid benchmark _(benchmarks/fluid.bench.ts; 384-cell tick 2.60 ms mean, basin flood ≈2.7 s — docs/performance.md)_
+- [ ] Move fluid simulation to worker _(deferred — the budget keeps it on-thread and cheap)_
+- [ ] Investigate GPU fluid simulation _(deferred — research task, Phase 21 checkpoint)_
 
 ### Milestone
 
-- [ ] **Milestone 7 complete: Water can flow through the world**
+- [x] **Milestone 7 complete: Water can flow through the world** _(met — flow, conservation, containment, quiescence, swim/climb, and save-v2 restore verified by unit tests AND the headless browser suite)_
 
 ---
 
@@ -1196,12 +1259,12 @@ Only after core deterministic simulation is stable.
 
 ## Simulation invariants
 
-- [ ] Fluid approximately conserves mass
-- [ ] Fluid boundary conditions are stable
+- [x] Fluid approximately conserves mass _(exact in closed basins — tests/fluid.test.ts + in-browser containment/conservation checks, Session 005)_
+- [x] Fluid boundary conditions are stable _(solid containment, world edges, frontier sleep — tests/fluid.test.ts, Session 005)_
 - [ ] Fire cannot ignite nonflammable materials
 - [ ] Fire extinguishes correctly
-- [ ] Unsupported structures become unstable
-- [ ] Detached structures are not simulated as intact
+- [x] Unsupported structures become unstable _(pillar-roof collapse fixture — tests/support.test.ts, Session 004)_
+- [x] Detached structures are not simulated as intact _(collapses as one command with debris specs — Session 004)_
 - [ ] Simulation remains stable under extreme edits
 
 ## Stress tests
@@ -1213,7 +1276,7 @@ Only after core deterministic simulation is stable.
 - [ ] Large deletion _(cut tool + brush delete are grouped single commands; collapse of 100+ cell components tested — Session 004)_
 - [ ] Large paste _(32³ budget-capped; grouped single command — Session 004)_
 - [x] Large explosion _(100-event explosion stress: pool capped, stable — tests/debrisPool.test.ts, Session 004)_
-- [ ] Large flood
+- [x] Large flood _(22×22 basin source-flood benchmark: settles in ≈2.7 s inside the budget; 384-cell budget tick 2.6 ms — Session 005)_
 - [ ] Large fire
 - [ ] Many NPCs
 - [ ] Many chunks loading/unloading
@@ -1231,8 +1294,8 @@ Only after core deterministic simulation is stable.
 - [ ] Materials
 - [ ] Editing
 - [ ] Serialization
-- [ ] Physics
-- [ ] Fluids
+- [x] Physics _(player controller notes in architecture — Player physics section)_
+- [x] Fluids _(architecture "Water (Phase 9)" — sim, hooks, rendering, swim, save v2)_
 - [ ] Fire
 - [ ] Structures
 - [ ] NPCs

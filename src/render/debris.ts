@@ -48,7 +48,10 @@ export class DebrisSystem {
   private cursor = 0;
   private active = 0;
 
-  constructor(scene: THREE.Scene, readonly capacity = 512) {
+  constructor(
+    scene: THREE.Scene,
+    readonly capacity = 512,
+  ) {
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
     this.mesh = new THREE.InstancedMesh(geometry, material, capacity);
@@ -162,8 +165,7 @@ export class DebrisSystem {
         if (Math.abs(state.vy) < 0.6) state.vy = 0;
       }
 
-      const fade =
-        state.life < FADE_SECONDS ? Math.max(state.life / FADE_SECONDS, 0) : 1;
+      const fade = state.life < FADE_SECONDS ? Math.max(state.life / FADE_SECONDS, 0) : 1;
       const s = state.scale * fade;
       this.dummy.position.set(state.x, state.y, state.z);
       this.dummy.rotation.set(state.rx, state.ry, state.rz);

@@ -138,11 +138,12 @@ describe('debrisFromCells', () => {
   it('skips cells that are already air', () => {
     const world = new World(() => {});
     world.ensureChunk(0, 0, 0);
-    const specs = debrisFromCells(
-      [{ x: 1, y: 2, z: 3 }],
-      (x, y, z) => world.getVoxel(x, y, z),
-      { seed: 1, maxDebris: 4, x: 0, z: 0 },
-    );
+    const specs = debrisFromCells([{ x: 1, y: 2, z: 3 }], (x, y, z) => world.getVoxel(x, y, z), {
+      seed: 1,
+      maxDebris: 4,
+      x: 0,
+      z: 0,
+    });
     expect(specs).toHaveLength(0);
   });
 });

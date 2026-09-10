@@ -30,12 +30,7 @@ import {
   type BrushShape,
   type BrushTool,
 } from './creator/brush';
-import {
-  copyRegion,
-  selectionBounds,
-  selectionFits,
-  type BoxSelection,
-} from './creator/selection';
+import { copyRegion, selectionBounds, selectionFits, type BoxSelection } from './creator/selection';
 import {
   mirrorClipboardX,
   pasteEdits,
@@ -150,13 +145,13 @@ function main(): void {
   const engine = createEngine(container, { fogNear, fogFar, skyColor: 0x87b5e0 });
   const materials = createVoxelMaterials({ fogNear, fogFar, skyColor: 0x87b5e0 });
 
-const chunkMeshes = new ChunkMeshManager(engine.scene, world, materials, {
-  streaming: streamingParams(RENDER_RADIUS),
-  meshBudgetPerFrame: MESH_BUDGET_PER_FRAME,
-  waterLevels: (x, y, z) => fluid.levelAt(x, y, z),
-});
-const selectionViz = new SelectionViz(engine.scene);
-const creatorViz = new CreatorViz(engine.scene);
+  const chunkMeshes = new ChunkMeshManager(engine.scene, world, materials, {
+    streaming: streamingParams(RENDER_RADIUS),
+    meshBudgetPerFrame: MESH_BUDGET_PER_FRAME,
+    waterLevels: (x, y, z) => fluid.levelAt(x, y, z),
+  });
+  const selectionViz = new SelectionViz(engine.scene);
+  const creatorViz = new CreatorViz(engine.scene);
 
   const player: PlayerState = createPlayerState(SPAWN);
   const input = new InputManager(engine.renderer.domElement);
@@ -291,7 +286,11 @@ const creatorViz = new CreatorViz(engine.scene);
     // the targeted cell itself.
     const center: WorldCoordinate =
       brush.tool === 'place'
-        ? { x: hit.voxel.x + hit.normal.x, y: hit.voxel.y + hit.normal.y, z: hit.voxel.z + hit.normal.z }
+        ? {
+            x: hit.voxel.x + hit.normal.x,
+            y: hit.voxel.y + hit.normal.y,
+            z: hit.voxel.z + hit.normal.z,
+          }
         : hit.voxel;
     if (brush.tool === 'explode') {
       doExplosion(hit);
@@ -455,7 +454,11 @@ const creatorViz = new CreatorViz(engine.scene);
   /** Camera look direction from the player's yaw/pitch (YXZ convention). */
   const lookDirection = (): { x: number; y: number; z: number } => {
     const cos = Math.cos(player.pitch);
-    return { x: -Math.sin(player.yaw) * cos, y: Math.sin(player.pitch), z: -Math.cos(player.yaw) * cos };
+    return {
+      x: -Math.sin(player.yaw) * cos,
+      y: Math.sin(player.pitch),
+      z: -Math.cos(player.yaw) * cos,
+    };
   };
 
   const targetHit = (): RaycastHit | undefined =>
@@ -483,9 +486,7 @@ const creatorViz = new CreatorViz(engine.scene);
       const z = hit.voxel.z + cell.z;
       const current = world.getVoxel(x, y, z);
       if (current !== AIR && current !== WATER) return;
-      if (
-        intersectsPlayerCell({ x, y, z }, player.position, PLAYER_WIDTH / 2, PLAYER_HEIGHT)
-      ) {
+      if (intersectsPlayerCell({ x, y, z }, player.position, PLAYER_WIDTH / 2, PLAYER_HEIGHT)) {
         return;
       }
       edit([{ x, y, z, material: selectedMaterial }], 'place');
@@ -537,7 +538,10 @@ const creatorViz = new CreatorViz(engine.scene);
       // Paint: recolor the targeted voxel in place (bedrock protected).
       const hit = targetHit();
       if (hit && hit.voxel.y > BEDROCK_Y) {
-        edit([{ x: hit.voxel.x, y: hit.voxel.y, z: hit.voxel.z, material: selectedMaterial }], 'paint');
+        edit(
+          [{ x: hit.voxel.x, y: hit.voxel.y, z: hit.voxel.z, material: selectedMaterial }],
+          'paint',
+        );
       }
       return;
     }
@@ -691,7 +695,11 @@ const creatorViz = new CreatorViz(engine.scene);
         const brush = { ...creator.brush, material: selectedMaterial };
         const center: WorldCoordinate =
           brush.tool === 'place'
-            ? { x: hit.voxel.x + hit.normal.x, y: hit.voxel.y + hit.normal.y, z: hit.voxel.z + hit.normal.z }
+            ? {
+                x: hit.voxel.x + hit.normal.x,
+                y: hit.voxel.y + hit.normal.y,
+                z: hit.voxel.z + hit.normal.z,
+              }
             : hit.voxel;
         const ghostColor =
           brush.tool === 'place' ? getMaterial(selectedMaterial).color : TOOL_COLORS[brush.tool];
@@ -746,7 +754,9 @@ const creatorViz = new CreatorViz(engine.scene);
         const sel = creator.selection
           ? `sel ${creator.selection.max.x - creator.selection.min.x + 1}×${creator.selection.max.y - creator.selection.min.y + 1}×${creator.selection.max.z - creator.selection.min.z + 1}`
           : creator.selectMode
-            ? (creator.corner ? 'sel corner set' : 'sel pick corner 1')
+            ? creator.corner
+              ? 'sel corner set'
+              : 'sel pick corner 1'
             : 'sel none';
         const clip = creator.clipboard
           ? `clip ${creator.clipboard.size.x}×${creator.clipboard.size.y}×${creator.clipboard.size.z}` +

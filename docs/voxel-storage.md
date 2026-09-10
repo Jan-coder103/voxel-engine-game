@@ -20,15 +20,15 @@ The palette widens automatically (1→2→4 bits) as materials appear and
 throws past 256 distinct materials (16³ terrain uses 3–5; the envelope
 is deliberate — see "Dense fallback" below).
 
-| Metric (16³ chunk)             | Dense `Uint16Array` | Packed (4-bit) |
-| ------------------------------ | ------------------- | -------------- |
-| Payload memory                 | 8192 B              | 2048 B         |
-| + occupancy grid               | —                   | 512 B          |
-| Typical terrain chunk (real)   | 8192 B              | 1536 B         |
-| Fill, terrain-like content     | 0.078 ms            | 0.275 ms       |
-| Sequential read ×4096          | 0.061 ms            | 0.252 ms       |
-| Random mixed ops ×4096         | 0.061 ms            | 0.252 ms       |
-| Greedy mesh through it         | —                   | 2.46 ms/chunk  |
+| Metric (16³ chunk)           | Dense `Uint16Array` | Packed (4-bit) |
+| ---------------------------- | ------------------- | -------------- |
+| Payload memory               | 8192 B              | 2048 B         |
+| + occupancy grid             | —                   | 512 B          |
+| Typical terrain chunk (real) | 8192 B              | 1536 B         |
+| Fill, terrain-like content   | 0.078 ms            | 0.275 ms       |
+| Sequential read ×4096        | 0.061 ms            | 0.252 ms       |
+| Random mixed ops ×4096       | 0.061 ms            | 0.252 ms       |
+| Greedy mesh through it       | —                   | 2.46 ms/chunk  |
 
 Reading the numbers: packed reads cost ~4× dense (bit extract +
 palette indirection). That is acceptable because the frame is mesh-bound,
@@ -56,7 +56,7 @@ satisfy the `VoxelData` interface, so nothing above storage can tell.
   material runs), but RLE decodes randomly-accessed voxels to O(run)
   and edits to O(layer); palette-packed indices keep O(1) random
   access at comparable size for our content. RLE remains interesting
-  as a *save-format* codec (the journal is already sparse; bulk chunk
+  as a _save-format_ codec (the journal is already sparse; bulk chunk
   snapshots are not needed yet).
 - **Sparse Voxel DAG/SVO.** Pointer/node overhead wins only at high
   resolution with large homogeneous regions (think 256³+ microvoxel

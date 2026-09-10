@@ -37,7 +37,10 @@ export class DustSystem {
   private cursor = 0;
   private active = 0;
 
-  constructor(scene: THREE.Scene, readonly capacity = 1024) {
+  constructor(
+    scene: THREE.Scene,
+    readonly capacity = 1024,
+  ) {
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshBasicMaterial({
       color: 0xc9d2da,

@@ -49,11 +49,7 @@ function emits(m: VoxelMaterialID, neighbor: VoxelMaterialID): boolean {
  */
 const AUX_SURFACED = 1 << 13;
 
-function waterAux(
-  level: number,
-  cellY: number,
-  surfaced: boolean,
-): number {
+function waterAux(level: number, cellY: number, surfaced: boolean): number {
   if (!surfaced || level >= 255 || level <= 0) return 0;
   return AUX_SURFACED | (level << 5) | cellY;
 }
@@ -191,14 +187,7 @@ export function meshVolumeGreedy(
           } else if (bInside && emits(b, a)) {
             maskMaterial[n] = b;
             maskDir[n] = -1;
-            maskAux[n] = faceAux(
-              b,
-              x[0] + q[0],
-              x[1] + q[1],
-              x[2] + q[2],
-              voxelAt,
-              waterLevel,
-            );
+            maskAux[n] = faceAux(b, x[0] + q[0], x[1] + q[1], x[2] + q[2], voxelAt, waterLevel);
           } else {
             maskMaterial[n] = 0;
             maskDir[n] = 0;
@@ -209,7 +198,7 @@ export function meshVolumeGreedy(
 
       // 2. Greedily merge the mask into maximal rectangles.
       for (let j = 0; j < size; j++) {
-        for (let i = 0; i < size; ) {
+        for (let i = 0; i < size;) {
           const idx = j * size + i;
           const material = maskMaterial[idx];
           if (material === 0) {

@@ -201,20 +201,17 @@ export class ChunkMeshManager {
     // LOD1 meshes a half-resolution volume; the query reads one
     // representative world voxel per boundary block (culling only needs
     // the neighbor's material class, and LOD seams are far away).
-    const volume =
-      lod === 0 ? chunk.volume : downsampleVolume(chunk.volume, LOD1_FACTOR);
+    const volume = lod === 0 ? chunk.volume : downsampleVolume(chunk.volume, LOD1_FACTOR);
     const stride = lod === 1 ? LOD1_FACTOR : 1;
     // Flow heights only exist at full resolution (LOD1 water = full cube).
-    const waterLevels =
-      lod === 0 ? this.params.waterLevels : undefined;
+    const waterLevels = lod === 0 ? this.params.waterLevels : undefined;
     const mesh = meshVolumeGreedy(
       volume,
       (lx, ly, lz) =>
         this.world.getVoxel(origin.x + lx * stride, origin.y + ly * stride, origin.z + lz * stride),
       waterLevels
-        ? (lx, ly, lz) =>
-            waterLevels(origin.x + lx, origin.y + ly, origin.z + lz)
-      : undefined,
+        ? (lx, ly, lz) => waterLevels(origin.x + lx, origin.y + ly, origin.z + lz)
+        : undefined,
     );
 
     const entry: ChunkEntry = existing ?? {

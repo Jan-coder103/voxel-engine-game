@@ -84,7 +84,8 @@ export class PackedVolume implements VoxelData {
     this.assertIndexInBounds(index);
     if (this.bits === 0) return AIR;
     if (!this.occupancy.get(index)) return AIR;
-    const entry = (this.data[index / this.perWord | 0] >>> ((index % this.perWord) * this.bits)) & this.mask;
+    const entry =
+      (this.data[(index / this.perWord) | 0] >>> ((index % this.perWord) * this.bits)) & this.mask;
     return this.palette[entry];
   }
 
@@ -100,7 +101,7 @@ export class PackedVolume implements VoxelData {
     const entry = this.palette.indexOf(material);
     const resolved = entry === -1 ? this.admitMaterial(material) : entry;
 
-    const word = index / this.perWord | 0;
+    const word = (index / this.perWord) | 0;
     const shift = (index % this.perWord) * this.bits;
     this.data[word] = (this.data[word] & ~(this.mask << shift)) | (resolved << shift);
     this.occupancy.set(index);
@@ -148,8 +149,8 @@ export class PackedVolume implements VoxelData {
     if (oldBits === 0) return;
     for (let i = 0; i < this.voxelCount; i++) {
       if (!this.occupancy.get(i)) continue;
-      const entry = (oldData[i / oldPerWord | 0] >>> ((i % oldPerWord) * oldBits)) & oldMask;
-      this.data[i / this.perWord | 0] |= entry << ((i % this.perWord) * this.bits);
+      const entry = (oldData[(i / oldPerWord) | 0] >>> ((i % oldPerWord) * oldBits)) & oldMask;
+      this.data[(i / this.perWord) | 0] |= entry << ((i % this.perWord) * this.bits);
     }
   }
 

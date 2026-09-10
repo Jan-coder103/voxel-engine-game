@@ -15,8 +15,7 @@ import { worldToChunk, worldToLocal } from '../src/voxel/coordinates';
 function basinWorld(): World {
   const world = new World(() => {});
   for (let cy = 0; cy < 2; cy++)
-    for (let cz = 0; cz < 2; cz++)
-      for (let cx = 0; cx < 2; cx++) world.ensureChunk(cx, cy, cz);
+    for (let cz = 0; cz < 2; cz++) for (let cx = 0; cx < 2; cx++) world.ensureChunk(cx, cy, cz);
   for (let z = 0; z < 24; z++) {
     for (let x = 0; x < 24; x++) {
       world.setVoxel(x, 0, z, STONE);
@@ -36,10 +35,7 @@ function seedPuddle(world: World, fluid: FluidSim, count: number): void {
       cells.push([x, z]);
       const key = `${worldToChunk(x)},0,${worldToChunk(z)}`;
       const list = byChunk.get(key) ?? [];
-      list.push([
-        worldToLocal(x) + worldToLocal(z) * 16 + 1 * 256,
-        200,
-      ]);
+      list.push([worldToLocal(x) + worldToLocal(z) * 16 + 1 * 256, 200]);
       byChunk.set(key, list);
     }
   }

@@ -4,6 +4,58 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.7.0] — 2026-09-10 — Phase 9 (Water)
+
+### Added
+
+- Cellular fluid simulation (`src/voxel/fluid.ts`): per-cell water
+  levels 0–255 with **255 = source** semantics (plain WATER material —
+  terrain lakes and player-placed water are sources with zero setup),
+  1–254 flowing water in a sparse chunk-keyed map. Gravity with a 254
+  cap, integer horizontal equalization (`diff >> 1` when `diff ≥ 2` —
+  never oscillates), exact mass conservation, sleep/wake with a ±1
+  neighborhood re-wake, and a budgeted `tick` (384 cells per fixed
+  step; settled water costs nothing).
+- World hooks: `onVoxelChanged` (fires after every successful
+  `setVoxel` — displacement/vaporization + neighborhood wake) and
+  `onChunkReady` (wakes water at the streaming frontier).
+- Flow-height water rendering: greedy mesher accepts a `waterLevel`
+  query and emits a per-vertex `waterDrop`; the water material sinks
+  top faces by (255 − level)/255. Full/submerged cells merge unchanged
+  (greedy↔naive equivalence tests still green). LOD1 water = full cubes.
+- Swimming: buoyancy, drag, sink cap, swim-up, and a wall-assist climb
+  boost that clears a 1-voxel bank from the waterline (controller
+  stays query-injected; legacy behavior unchanged without `waterAt`).
+- Water interactions: WATER is a placeable brush/hotbar material
+  (hotbar 6); brush place fills into water (displacement); explosions
+  vaporize water so surrounding sources re-flood the crater.
+- Save format **v2**: sparse `waterLevels` section (flowing cells
+  only), v1→v2 migration chain entry, structural validation of level
+  entries, boot restore of fluid state; flowed water marks the autosave
+  dirty.
+- Fluid HUD: `water N` active-cell counter, `swimming` state line,
+  inspector shows `water N/255`.
+- `benchmarks/fluid.bench.ts` — budgeted tick 2.6 ms mean, steady-state
+  0.42 ms/tick, 22×22 basin flood settles in ≈2.7 s (baselines in
+  `docs/performance.md`).
+- 35 new tests (240 total, 22 files): mass conservation, boundaries,
+  cross-chunk flow, frontier sleep/wake, displacement, v2 round-trips,
+  swim/climb physics, flow-height meshing.
+
+### Fixed
+
+- **Frontier churn (found by headless browser verification):** a fluid
+  write that failed on an unloaded chunk still re-activated its cell's
+  neighborhood, so lake edges at the streaming frontier churned ~10³
+  cells forever and starved the activity budget. Failed writes now
+  propagate nothing; frontier water sleeps and resumes on
+  `onChunkReady` (regression-tested).
+
+### Changed
+
+- Prettier reflow across the repo (the previous commit predated an
+  `npm run format` pass).
+
 ## [0.6.0] — 2026-09-09 — Phase 8 (Destruction)
 
 ### Added

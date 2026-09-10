@@ -5,10 +5,33 @@ milestone goes here before it goes to the backlog.
 
 ## Engine / gameplay
 
-- **Water is a placeholder.** It renders translucently but has no
-  collision or buoyancy — players walk on lake beds. Swimming/fluid
-  simulation arrives in Phase 9. Water is also not targetable by the
-  edit raycast (you edit through it, which is intended for now).
+- **Water: no pressure or up-flow.** Water can never rise above its
+  source level — u-tubes don't equalize, and a source floods exactly
+  every reachable cell at or below its own level (place a source above
+  a basin rim and the shore floods; that is the rule working, not a
+  leak). Pressure is a deferred Phase 9 item.
+- **Water is not raycast-targetable.** You edit through lakes (the
+  ghost/placement path still allows placing _into_ water cells, which
+  displaces them). Intended.
+- **Flowing water equalizes in integer steps** (`diff >> 1` per cell
+  pair when `diff ≥ 2`), so puddle surfaces can rest slightly uneven —
+  a cellular look, accepted by design.
+- **LOD1 water renders full cubes.** The flow-height query is not
+  passed at distance, so partial levels render as full blocks; the
+  surface drop only shows near the player.
+- **Undo turns flowed water into sources.** A forward edit deletes the
+  fluid's sparse level for that cell (the `onVoxelChanged` hook);
+  undoing restores the WATER material, which reads as a source (255) —
+  not the original partial level. Believable, but undo is not a
+  fluid-state time machine. If unwanted later: capture levels in
+  `EditCommand`.
+- **Unloaded-chunk water writes fail silently.** Water waits at the
+  streaming frontier until `onChunkReady` wakes it (tested). A source
+  whose neighborhood is not loaded holds its level rather than leaking.
+- **Terrain lakes wake once on generation.** Chunks carrying lake water
+  churn briefly when they stream in, then sleep (sources against full
+  cells settle in a tick; a failed frontier write re-activates nothing
+  — regression-tested). No persistent per-frame cost.
 - **Void fall.** Outrunning stream generation (or falling off
   steep unloaded edges) drops the player into the void; respawn at
   y < −32 recovers. A "freeze physics in unloaded chunks" guard is a
@@ -63,8 +86,10 @@ milestone goes here before it goes to the backlog.
   InstancedMesh boxes that bounce, settle, and shrink away — they do not
   re-materialize as voxels where they land (undo is the restoration
   path). Debris pool: 512 pieces, ring-buffer recycling; dust: 1024.
-- **Explosions ignore water.** Water cells are never fractured (Phase 9
-  owns fluids); a blast under a lake leaves the water surface intact.
+- **Explosions vaporize water.** Water cells inside the blast are
+  edited to air (no debris, not counted as destroyed); surrounding
+  sources then re-flood the crater. Fire coupling (steam/heat) is
+  Phase 10.
 - **No heat, no NPC reaction yet.** The explosion pipeline stops at
   edits + debris + dust + sound; heat coupling arrives with fire
   (Phase 10) and NPC reactions with Phase 12/13.

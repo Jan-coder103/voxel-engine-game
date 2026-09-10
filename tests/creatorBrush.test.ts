@@ -1,18 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { World } from '../src/voxel/world';
-import {
-  applyEdits,
-  EditHistory,
-  type VoxelEdit,
-} from '../src/voxel/edits';
-import {
-  AIR,
-  DIRT,
-  GRASS,
-  SAND,
-  STONE,
-  WATER,
-} from '../src/voxel/materials';
+import { applyEdits, EditHistory, type VoxelEdit } from '../src/voxel/edits';
+import { AIR, DIRT, GRASS, SAND, STONE, WATER } from '../src/voxel/materials';
 import {
   BRUSH_MAX_SIZE,
   BRUSH_MIN_SIZE,
@@ -135,10 +124,8 @@ describe('brushEdits tools', () => {
         () => AIR,
       ),
     );
-    const edits = brushEdits(
-      baseBrush({ shape: 'box', size: 2, tool: 'delete' }),
-      mid,
-      (x, y, z) => world.getVoxel(x, y, z),
+    const edits = brushEdits(baseBrush({ shape: 'box', size: 2, tool: 'delete' }), mid, (x, y, z) =>
+      world.getVoxel(x, y, z),
     );
     expect(edits).toHaveLength(27);
     apply(world, edits);
@@ -220,7 +207,11 @@ describe('brushEdits tools', () => {
     ]);
     // Water itself is a placeable material (creates fluid sources).
     expect(
-      brushEdits(baseBrush({ shape: 'box', size: 2, tool: 'place', material: WATER }), C, () => AIR),
+      brushEdits(
+        baseBrush({ shape: 'box', size: 2, tool: 'place', material: WATER }),
+        C,
+        () => AIR,
+      ),
     ).toContainEqual({ x: 0, y: 5, z: 0, material: WATER });
   });
 });
@@ -231,11 +222,7 @@ describe('brush strokes are one undoable command', () => {
     const history = new EditHistory();
     apply(
       world,
-      brushEdits(
-        baseBrush({ shape: 'box', size: 2, tool: 'place', material: DIRT }),
-        C,
-        () => AIR,
-      ),
+      brushEdits(baseBrush({ shape: 'box', size: 2, tool: 'place', material: DIRT }), C, () => AIR),
     );
     const stroke = applyEdits(
       world,

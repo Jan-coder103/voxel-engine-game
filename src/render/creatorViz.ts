@@ -65,7 +65,12 @@ export class CreatorViz {
   }
 
   /** Preview the brush shape centered on `center` (cell coords). */
-  showBrushGhost(shape: BrushShape, center: { x: number; y: number; z: number }, size: number, colorHex: number): void {
+  showBrushGhost(
+    shape: BrushShape,
+    center: { x: number; y: number; z: number },
+    size: number,
+    colorHex: number,
+  ): void {
     this.ghostMaterial.color.setHex(colorHex);
     for (const [name, mesh] of Object.entries(this.ghostMeshes)) {
       mesh!.visible = name === shape;
@@ -94,7 +99,10 @@ export class CreatorViz {
   }
 
   /** Preview box for a paste of `size` cells anchored at `origin`. */
-  showPaste(origin: { x: number; y: number; z: number }, size: { x: number; y: number; z: number }): void {
+  showPaste(
+    origin: { x: number; y: number; z: number },
+    size: { x: number; y: number; z: number },
+  ): void {
     this.placeBox(this.pasteBox, origin, size);
   }
 

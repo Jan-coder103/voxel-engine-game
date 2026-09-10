@@ -111,8 +111,13 @@ function validateV2(payload: Record<string, unknown>): SerializedWorldV2 {
   ) {
     throw new Error('Save is missing a valid "terrain" block');
   }
-  const materials = payload.materials as Partial<{ version: number; materials: unknown }> | undefined;
-  if (!materials || materials.version !== MATERIAL_FORMAT_VERSION || !Array.isArray(materials.materials)) {
+  const materials = payload.materials as
+    Partial<{ version: number; materials: unknown }> | undefined;
+  if (
+    !materials ||
+    materials.version !== MATERIAL_FORMAT_VERSION ||
+    !Array.isArray(materials.materials)
+  ) {
     throw new Error('Save is missing a valid "materials" block');
   }
   const edits = payload.edits as Record<string, unknown> | undefined;
@@ -135,7 +140,8 @@ function validateV2(payload: Record<string, unknown>): SerializedWorldV2 {
     throw new Error('Save is missing "waterLevels"');
   }
   for (const [key, entries] of Object.entries(waterLevels)) {
-    if (!Array.isArray(entries)) throw new Error(`Save water levels for chunk ${key} are not an array`);
+    if (!Array.isArray(entries))
+      throw new Error(`Save water levels for chunk ${key} are not an array`);
     for (const entry of entries) {
       if (
         !Array.isArray(entry) ||
@@ -226,7 +232,10 @@ export class AutosavePolicy {
   private dirty = false;
   private lastSaveAt: number;
 
-  constructor(private readonly options: AutosaveOptions, now = 0) {
+  constructor(
+    private readonly options: AutosaveOptions,
+    now = 0,
+  ) {
     this.lastSaveAt = now;
   }
 

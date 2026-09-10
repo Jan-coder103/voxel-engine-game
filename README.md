@@ -6,13 +6,15 @@ and NPCs that react to all of it. Long-term roadmap lives in
 `MICRO_WORLD_DEVELOPMENT_PLAN.md`; session-by-session state lives in
 `MICRO_WORLD_PROGRESS.md`.
 
-**Current state:** Phases 0–8 complete — an infinite streamed world of
+**Current state:** Phases 0–9 complete — an infinite streamed world of
 deterministic seeded terrain that is **editable, saveable, and
 destructible**: brush tools, box selection, clipboard, prefabs, and a
-voxel inspector (creator mode), plus explosions with material
-resistance, support-aware structural collapse, pooled debris and dust,
-and procedural sound (Milestones 1–5 met; the Phase 8 gate criteria are
-verified by tests).
+voxel inspector (creator mode), explosions with material resistance,
+support-aware structural collapse, pooled debris and dust, procedural
+sound, and **flowing water** — cellular fluid with sources, gravity,
+equalization, flow-height rendering, swimming, and save-format v2
+(Milestones 1–7 met; the Phase 8 gate criteria are verified by tests,
+and water mass conservation is tested exactly).
 
 ## Quickstart
 
@@ -25,9 +27,10 @@ npm run dev        # dev server, print the URL it gives you
 
 Append `?seed=1234` to the URL for a different (still deterministic) world.
 
-Controls: click to capture the mouse, **WASD** move, **Space** jump,
-**Esc** release the mouse; **LMB** remove, **RMB** place, **MMB** pick
-material, **F** paint, **1–6**/wheel select material, **Ctrl+Z/Y**
+Controls: click to capture the mouse, **WASD** move, **Space** jump
+(hold against a bank underwater to climb out), **Esc** release the
+mouse; **LMB** remove, **RMB** place, **MMB** pick material, **F** paint,
+**1–6**/wheel select material (6 = water — it flows), **Ctrl+Z/Y**
 undo/redo, **K** save, **L** load, **N** mute sound. Fall into the void
 and you respawn. The world autosaves (20 s cadence + when the tab hides)
 and restores on reload; `?seed=1234` starts a different fresh world.
@@ -66,6 +69,7 @@ src/voxel/                 World state (no three.js — see ADR-002)
   chunk.ts, world.ts       Chunk wrapper + chunk map (get/set, dirty propagation)
   edits.ts                 EditCommand grouping, undo/redo history, player guard
   raycast.ts               Voxel DDA selection raycast (pure)
+  fluid.ts                 Cellular water: levels, sources, sleep/wake, budgeted ticks
   damage.ts                Explosion damage fields, debris specs (pure)
   support.ts               Detached-region (collapse) detection (pure)
   persistence.ts           Versioned save schema, migration, autosave policy

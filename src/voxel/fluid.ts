@@ -326,16 +326,18 @@ export class FluidSim {
 
   /**
    * Write a level, keeping the sparse map and the voxel material in sync.
-   * Fails silently in unloaded chunks (the water waits — reads keep
-   * returning the old level because the material never changed).
+   * Returns false when the cell refused the write (unloaded chunk) — the
+   * caller must not propagate mass or re-activate in that case, or a
+   * frontier cell would wake itself forever. Fails silently: reads keep
+   * returning the old level because the material never changed.
    */
-  private setLevel(x: number, y: number, z: number, level: number): void {
+  private setLevel(x: number, y: number, z: number, level: number): boolean {
     const current = this.levelAt(x, y, z);
-    if (current === level) return;
+    if (current === level) return true;
     const isWater = current > 0;
     const wantWater = level > 0;
     if (isWater !== wantWater) {
-      if (!this.world.setVoxel(x, y, z, wantWater ? WATER : AIR)) return;
+      if (!this.world.setVoxel(x, y, z, wantWater ? WATER : AIR)) return false;
     }
     if (level > 0 && level < WATER_SOURCE_LEVEL) {
       this.mapForWrite(worldToChunk(x), worldToChunk(y), worldToChunk(z)).set(
@@ -346,6 +348,7 @@ export class FluidSim {
       this.deleteLevel(x, y, z);
     }
     this.dirty = true;
+    return true;
   }
 
   /** One cell's movement rules for one tick. */
@@ -362,7 +365,7 @@ export class FluidSim {
         const space = WATER_FLOW_MAX - below;
         const move = Math.min(level, space);
         if (move > 0) {
-          this.setLevel(x, y - 1, z, below + move);
+          if (!this.setLevel(x, y - 1, z, below + move)) return; // unloaded: waits
           this.setLevel(x, y, z, source ? WATER_SOURCE_LEVEL : level - move);
           this.activateAround(x, y - 1, z);
           this.activateAround(x, y, z);
@@ -384,7 +387,7 @@ export class FluidSim {
       const diff = current - neighbor;
       if (diff < 2) continue;
       const move = diff >> 1;
-      this.setLevel(nx, y, nz, neighbor + move);
+      if (!this.setLevel(nx, y, nz, neighbor + move)) continue; // unloaded side
       current -= move;
       this.setLevel(x, y, z, isSource ? WATER_SOURCE_LEVEL : current);
       this.activateAround(nx, y, nz);

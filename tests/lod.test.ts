@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  DEFAULT_LOD_PARAMS,
-  LOD1_FACTOR,
-  desiredLod,
-  downsampleVolume,
-} from '../src/voxel/lod';
+import { DEFAULT_LOD_PARAMS, LOD1_FACTOR, desiredLod, downsampleVolume } from '../src/voxel/lod';
 import { VoxelVolume } from '../src/voxel/voxelVolume';
 import { AIR, DIRT, GRASS, SAND, STONE, WATER } from '../src/voxel/materials';
 import { Chunk } from '../src/voxel/chunk';
@@ -67,7 +62,13 @@ describe('downsampleVolume', () => {
     // become solid, or LOD1 terrain sits above the real surface.
     const half = new VoxelVolume(2);
     half.fill(STONE);
-    for (const [x, z] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) half.set(x, 1, z, AIR);
+    for (const [x, z] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ] as const)
+      half.set(x, 1, z, AIR);
     expect(downsampleVolume(half).get(0, 0, 0)).toBe(AIR);
 
     // Tie between two non-air materials also goes to air.
@@ -82,8 +83,7 @@ describe('downsampleVolume', () => {
   it('LOD1 of a column never rises above the real surface', () => {
     const fillTo = (volume: VoxelVolume, height: number) => {
       for (let y = 0; y < height; y++)
-        for (let z = 0; z < 32; z++)
-          for (let x = 0; x < 32; x++) volume.set(x, y, z, STONE);
+        for (let z = 0; z < 32; z++) for (let x = 0; x < 32; x++) volume.set(x, y, z, STONE);
     };
 
     // 32³ volume → 16³ LOD, so blocks {16,17} are covered at ly=8.

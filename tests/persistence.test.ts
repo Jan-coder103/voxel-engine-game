@@ -79,23 +79,32 @@ describe('save migration + validation', () => {
   });
 
   it('rejects a newer save version with a clear error', () => {
-    const payload = { ...JSON.parse(JSON.stringify(serializeWorld(worldWithEdits(), TERRAIN))), version: 99 };
+    const payload = {
+      ...JSON.parse(JSON.stringify(serializeWorld(worldWithEdits(), TERRAIN))),
+      version: 99,
+    };
     expect(() => migrateWorld(payload)).toThrow(/newer than this build/);
   });
 
   it('rejects an older version with no migration path', () => {
-    const payload = { ...JSON.parse(JSON.stringify(serializeWorld(worldWithEdits(), TERRAIN))), version: 0 };
+    const payload = {
+      ...JSON.parse(JSON.stringify(serializeWorld(worldWithEdits(), TERRAIN))),
+      version: 0,
+    };
     expect(() => migrateWorld(payload)).toThrow(/No migration path from save version 0/);
   });
 
   it('rejects payloads missing required blocks', () => {
     expect(() => migrateWorld({ version: 2 })).toThrow(/seed/);
     expect(() => migrateWorld({ version: 2, seed: 1 })).toThrow(/terrain/);
+    expect(() => migrateWorld({ version: 2, seed: 1, terrain: TERRAIN })).toThrow(/materials/);
     expect(() =>
-      migrateWorld({ version: 2, seed: 1, terrain: TERRAIN }),
-    ).toThrow(/materials/);
-    expect(() =>
-      migrateWorld({ version: 2, seed: 1, terrain: TERRAIN, materials: { version: 1, materials: [] } }),
+      migrateWorld({
+        version: 2,
+        seed: 1,
+        terrain: TERRAIN,
+        materials: { version: 1, materials: [] },
+      }),
     ).toThrow(/edits/);
     expect(() =>
       migrateWorld({
@@ -123,7 +132,12 @@ describe('save migration + validation', () => {
   });
 
   it('round-trips fluid levels through serialize/deserialize', () => {
-    const levels: Record<string, [number, number][]> = { '0,0,0': [[5, 200], [130, 1]] };
+    const levels: Record<string, [number, number][]> = {
+      '0,0,0': [
+        [5, 200],
+        [130, 1],
+      ],
+    };
     const data = deserializeWorld(
       JSON.stringify(serializeWorld(worldWithEdits(), TERRAIN, 1234, levels)),
     );

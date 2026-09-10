@@ -36,9 +36,7 @@ export function rotateClipboardY(clip: ClipboardVolume, quarters: number): Clipb
   const q = ((quarters % 4) + 4) % 4;
   if (q === 0) return clip;
   const once = q === 1 || q === 3;
-  const size = once
-    ? { x: clip.size.z, y: clip.size.y, z: clip.size.x }
-    : { ...clip.size };
+  const size = once ? { x: clip.size.z, y: clip.size.y, z: clip.size.x } : { ...clip.size };
   const out = new Uint16Array(size.x * size.y * size.z);
   for (let y = 0; y < clip.size.y; y++) {
     for (let z = 0; z < clip.size.z; z++) {
@@ -59,9 +57,8 @@ export function mirrorClipboardX(clip: ClipboardVolume): ClipboardVolume {
   for (let y = 0; y < clip.size.y; y++) {
     for (let z = 0; z < clip.size.z; z++) {
       for (let x = 0; x < clip.size.x; x++) {
-        out[index(clip.size.x, clip.size.z, clip.size.x - 1 - x, y, z)] = clip.voxels[
-          index(clip.size.x, clip.size.z, x, y, z)
-        ];
+        out[index(clip.size.x, clip.size.z, clip.size.x - 1 - x, y, z)] =
+          clip.voxels[index(clip.size.x, clip.size.z, x, y, z)];
       }
     }
   }

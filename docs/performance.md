@@ -19,14 +19,14 @@ Measured 2026-09-09, Node 22 (Linux, CI-shaped machine), vitest bench
 default settings. Numbers are per-call means; the naive culled mesher is
 kept as the correctness baseline, the greedy mesher is production.
 
-| Scene                    | Naive      | Greedy     | Greedy win |
-| ------------------------ | ---------- | ---------- | ---------- |
-| solid 16³ (hull only)    | 2.96 ms    | 2.14 ms    | 1.4×       |
-| checker 16³ (worst case) | 10.56 ms   | 7.06 ms    | 1.5×       |
-| layered 16³              | —          | 2.33 ms    | —          |
-| solid 32³                | 22.07 ms   | 17.29 ms   | 1.3×       |
-| checker 32³ (worst case) | 99.57 ms   | 68.91 ms   | 1.4×       |
-| terrain chunk 16³        | 3.15 ms    | 2.46 ms    | 1.3×       |
+| Scene                    | Naive    | Greedy   | Greedy win |
+| ------------------------ | -------- | -------- | ---------- |
+| solid 16³ (hull only)    | 2.96 ms  | 2.14 ms  | 1.4×       |
+| checker 16³ (worst case) | 10.56 ms | 7.06 ms  | 1.5×       |
+| layered 16³              | —        | 2.33 ms  | —          |
+| solid 32³                | 22.07 ms | 17.29 ms | 1.3×       |
+| checker 32³ (worst case) | 99.57 ms | 68.91 ms | 1.4×       |
+| terrain chunk 16³        | 3.15 ms  | 2.46 ms  | 1.3×       |
 
 (Phase 2–4 baseline for the naive mesher on the earlier machine: solid
 16³ ≈ 1.8 ms, checker 16³ ≈ 10 ms — same magnitude; treat cross-machine
@@ -35,11 +35,11 @@ deltas as noise until Phase 23 benchmark serialization exists.)
 **Quad counts per terrain chunk (16³, seed 1337)** — the real greedy
 payoff is emitted geometry, not build time:
 
-| Meshing path     | Quads |
-| ---------------- | ----- |
-| naive            | 1506  |
-| greedy           | 185   |
-| greedy + LOD1    | 70    |
+| Meshing path  | Quads |
+| ------------- | ----- |
+| naive         | 1506  |
+| greedy        | 185   |
+| greedy + LOD1 | 70    |
 
 In-game the whole radius-6 view dropped from ~82.5k quads (naive) to
 ~8.8–9.1k quads (greedy + LOD1) at 60 fps.
@@ -49,12 +49,12 @@ In-game the whole radius-6 view dropped from ~82.5k quads (naive) to
 Same machine/date; 16³ terrain-like volumes. Full discussion in
 `docs/voxel-storage.md`.
 
-| Scene                          | Dense   | Packed  |
-| ------------------------------ | ------- | ------- |
-| fill, terrain-like content     | 0.078 ms| 0.275 ms|
-| sequential read ×4096          | 0.061 ms| 0.252 ms|
-| random mixed ops ×4096         | 0.061 ms| 0.252 ms|
-| memory, typical terrain chunk  | 8192 B  | 1536 B  |
+| Scene                         | Dense    | Packed   |
+| ----------------------------- | -------- | -------- |
+| fill, terrain-like content    | 0.078 ms | 0.275 ms |
+| sequential read ×4096         | 0.061 ms | 0.252 ms |
+| random mixed ops ×4096        | 0.061 ms | 0.252 ms |
+| memory, typical terrain chunk | 8192 B   | 1536 B   |
 
 Reading: packed reads are ~4× dense (bit extract + palette lookup), but
 meshing stays mesh-bound — a greedy mesh through `PackedVolume`
@@ -76,12 +76,12 @@ Generation remains an order of magnitude cheaper than meshing.
 2026-09-09, same machine (worst case: fully-solid stone world, i.e.
 every scanned cell is real work):
 
-| Scene                                        | ≈ time/op |
-| -------------------------------------------- | --------- |
-| explode r=6 in solid stone                   | ~4.5 ms   |
-| explode r=10 in solid stone (creator max)    | ~6.6 ms   |
-| support check — house-scale region (25×37×25)| ~10 ms    |
-| support check — supported terrain region     | ~14 ms    |
+| Scene                                         | ≈ time/op |
+| --------------------------------------------- | --------- |
+| explode r=6 in solid stone                    | ~4.5 ms   |
+| explode r=10 in solid stone (creator max)     | ~6.6 ms   |
+| support check — house-scale region (25×37×25) | ~10 ms    |
+| support check — supported terrain region      | ~14 ms    |
 
 Reading: an explosion click costs ~5 ms of damage-field + debris-spec
 computation, and the follow-up support check ~10–14 ms — together a
@@ -97,6 +97,28 @@ Debris/dust stepping is pool-bounded by construction: 512 debris +
 1024 dust instances in two InstancedMeshes, updated in ~0.1 ms per
 frame regardless of how many explosions fired (ring-buffer recycling;
 verified by the 100-event stress test in `tests/debrisPool.test.ts`).
+
+## Baselines — fluid (`benchmarks/fluid.bench.ts`)
+
+The budget question: does one `tick` at the game's activity budget
+(384 cells, 60 Hz fixed steps) stay inside a 16 ms frame, including the
+worst case — a puddle cascading across a floor?
+
+- **Budgeted tick, 384 active cells**: mean **2.60 ms**, p75 2.51 ms
+  (min 1.89 ms; tail samples are GC noise). Inside the frame with room —
+  the budget stays at 384.
+- **Steady-state churn** (10 ticks of a mid-spread puddle): 4.2 ms per
+  10 ticks ≈ **0.42 ms/tick** — real active sets are usually smaller.
+- **Full scenario, a source floods a 22×22 basin**: settles completely
+  in **≈ 2.7 s** of simulation (one-time; equalization is ±1 per cell
+  pair per tick).
+- **Terrain lake wake** (3 chunk generations + `onChunkReady` wake +
+  one tick): ≈ 3.4 ms — streaming amortizes this.
+- **Settled water costs zero**: cells sleep once every neighbor pair is
+  within `diff < 2`, so resting lakes and puddles leave the loop idle.
+  (An earlier build churned ~10³ cells forever at the streaming
+  frontier — a failed unloaded-chunk write still re-activated its
+  neighborhood; fixed and regression-tested in `tests/fluid.test.ts`.)
 
 ## Runtime (dev session, Phase 5–8 demo)
 

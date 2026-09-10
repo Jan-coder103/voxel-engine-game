@@ -46,8 +46,9 @@ describe('debris pool under stress', () => {
   it('update steps never resurrect pieces or move them once expired', () => {
     const scene = new THREE.Scene();
     const debris = new DebrisSystem(scene, 8);
-    debris.spawn([{ x: 0, y: 40, z: 0, vx: 0, vy: 0, vz: 0, material: GRASS, scale: 0.5 }], (m) =>
-      getMaterial(m).color,
+    debris.spawn(
+      [{ x: 0, y: 40, z: 0, vx: 0, vy: 0, vz: 0, material: GRASS, scale: 0.5 }],
+      (m) => getMaterial(m).color,
     );
     expect(debris.activeCount).toBe(1);
     const isSolid = () => false;
@@ -71,8 +72,9 @@ describe('debris pool under stress', () => {
   it('debris bounces and settles on solid ground instead of falling forever', () => {
     const scene = new THREE.Scene();
     const debris = new DebrisSystem(scene, 4);
-    debris.spawn([{ x: 2, y: 10, z: 2, vx: 1, vy: 0, vz: 0, material: STONE, scale: 0.5 }], (m) =>
-      getMaterial(m).color,
+    debris.spawn(
+      [{ x: 2, y: 10, z: 2, vx: 1, vy: 0, vz: 0, material: STONE, scale: 0.5 }],
+      (m) => getMaterial(m).color,
     );
     const isSolid = (x: number, y: number, _z: number) => y <= 3 && x >= 0;
     let low = 11;

@@ -99,10 +99,10 @@ describe('checkSupport', () => {
   it('cells touching the region boundary are assumed anchored', () => {
     const w = world();
     w.setVoxel(20, 8, 20, STONE); // lone block exactly at the region max edge
-    const result = checkSupport(
-      (x, y, z) => w.getVoxel(x, y, z),
-      { min: { x: 16, y: 0, z: 16 }, max: { x: 20, y: 12, z: 20 } },
-    );
+    const result = checkSupport((x, y, z) => w.getVoxel(x, y, z), {
+      min: { x: 16, y: 0, z: 16 },
+      max: { x: 20, y: 12, z: 20 },
+    });
     expect(result.unsupported).toHaveLength(0);
   });
 

@@ -155,6 +155,63 @@ procedural audio. Believability over accuracy (plan §26/§105).
   like any edit, and the journal persists it — Ctrl+Z can "un-explode" a
   crater across a reload.
 
+## Water (Phase 9)
+
+A pure cellular fluid (`src/voxel/fluid.ts`) layered over the voxel
+grid, deliberately not part of the edit journal (flow is simulation,
+not user intent — otherwise undo history would flood).
+
+- **Cells, not materials.** Every water-material cell has an implicit
+  level: **255 = source** (an inexhaustible spring — the plain default;
+  terrain lakes and player-placed water are sources with zero setup),
+  **1–254 = flowing** water kept in a sparse
+  `Map<chunkKey, Map<voxelIndex, level>>`. Air reads as 0; unloaded
+  chunks refuse writes (water waits at the streaming frontier until
+  `onChunkReady` wakes it). Rules per active cell: gravity down to the
+  254 cap, then horizontal equalization in fixed neighbor order
+  (`diff >> 1` when `diff ≥ 2` — integer-only, never oscillates).
+  Sources keep their 255; flow can never create a source. No pressure
+  or up-flow yet (Phase 9 deferred item).
+- **Sleep/wake + budget.** Only cells in an `active` set simulate; a
+  change re-wakes the ±1 neighborhood, a no-change tick lets the cell
+  sleep. `tick(budget)` (game: 384 cells per fixed step) bounds cost
+  regardless of flood size; settled water costs nothing. Writes go
+  through `World.setVoxel` (journaled + remeshed), and a failed write
+  (unloaded chunk) must not re-activate the cell — the frontier sleeps
+  instead of churning the budget dry.
+- **World hooks.** `world.onVoxelChanged(x, y, z, material)` fires
+  after every successful `setVoxel` (edits, undo/redo, sim writes):
+  FluidSim drops the level when a cell stops being water
+  (displacement/vaporization) and wakes the neighborhood.
+  `world.onChunkReady(chunk)` fires at the end of `ensureChunk` and
+  wakes water in the chunk plus its 6 face-adjacent planes so a source
+  parked at the streaming frontier resumes. Boot-time journal replay
+  deliberately fires neither hook (quiet restore).
+- **Flow-height rendering.** `meshVolumeGreedy` takes an optional
+  `waterLevel(x, y, z)` query. Surfaced partial cells (air above,
+  level < 255) merge with a distinct signature carrying the level; the
+  mesher writes a per-vertex `waterDrop` ((255 − level)/255) on
+  top-edge vertices, and the water material's vertex stage sinks
+  `p.y -= waterDrop`. Full and submerged cells merge as before, so
+  lakes stay cheap and the greedy↔naive equivalence tests hold. LOD1
+  water renders full cubes (no level query at distance, by design).
+- **Swimming.** `stepPlayer` takes an optional `waterAt` query; probes
+  at feet +0.2 and eye vs the surface (`cellY + level/255`). In water:
+  low gravity, drag, capped sink, swim-up on jump, and a wall-assist
+  climb boost (`WATER_CLIMB_SPEED`) that survives the swim cap for one
+  step — without it a 1-voxel bank above the waterline is unreachable.
+  Without the query the controller ignores water exactly as before.
+- **Interactions.** Brush place fills into water (displacement); WATER
+  is a placeable brush/hotbar material (creates sources); paint/replace
+  skip water; explosions **vaporize** water (edited to air, no debris,
+  not counted as destroyed) so surrounding sources re-flood the crater.
+  Water is not edit-raycast-targetable — you edit through lakes.
+- **Persistence v2.** `WORLD_FORMAT_VERSION = 2` adds a sparse
+  `waterLevels` section (only flowing 1–254 cells; sources and terrain
+  lakes are derivable), with v1→v2 migration and structural validation.
+  `exportLevels`/`loadLevels` are the fluid-side (de)serializers;
+  flowed water marks the autosave dirty via `fluid.takeDirty()`.
+
 ## Chunk meshing and streaming
 
 - Production meshing is `meshVolumeGreedy`: the 0fps per-axis sweep —
