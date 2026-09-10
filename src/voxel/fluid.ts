@@ -104,7 +104,11 @@ export class FluidSim {
   private dirty = false;
 
   constructor(private readonly world: World) {
+    // Wrap whatever hook exists (a sim constructed earlier, e.g. fire
+    // chaining onto this one's) instead of assuming the field is empty.
+    const previous = world.onVoxelChanged;
     world.onVoxelChanged = (x, y, z, material) => {
+      previous?.(x, y, z, material);
       if (material !== WATER) this.deleteLevel(x, y, z);
       this.activateAround(x, y, z);
     };

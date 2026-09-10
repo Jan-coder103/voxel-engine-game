@@ -14,6 +14,7 @@ import {
 import { raycastVoxels, type RaycastHit } from './voxel/raycast';
 import { applyEdits, EditHistory, intersectsPlayerCell, type VoxelEdit } from './voxel/edits';
 import { FluidSim } from './voxel/fluid';
+import { FireSim } from './voxel/fire';
 import { debrisFromCells, explode } from './voxel/damage';
 import { checkSupport, supportRegionFor } from './voxel/support';
 import {
@@ -24,6 +25,7 @@ import {
 } from './voxel/persistence';
 import { EventBus } from './sim/events';
 import {
+  brushCells,
   brushEdits,
   brushBounds,
   clampBrushSize,
@@ -46,6 +48,7 @@ import { SelectionViz } from './render/selectionViz';
 import { CreatorViz } from './render/creatorViz';
 import { DebrisSystem } from './render/debris';
 import { DustSystem } from './render/dust';
+import { FireFx } from './render/firefx';
 import { SoundFx } from './audio/sfx';
 import { LocalStorageSaveStore } from './persistence/localStorageStore';
 import { InputManager } from './player/input';
@@ -72,6 +75,8 @@ const FIXED_DT = 1 / 60;
 const MAX_SUBSTEPS = 5;
 /** Fluid cells simulated per fixed step (Phase 9 activity budget). */
 const FLUID_CELLS_PER_TICK = 384;
+/** Fire cells simulated per fixed step (Phase 10 activity budget). */
+const FIRE_CELLS_PER_TICK = 256;
 
 const EDIT_REACH = 6;
 const AUTOSAVE_INTERVAL_MS = 20_000;
@@ -121,6 +126,7 @@ function main(): void {
 
   const world = new World((chunk) => generateChunk(chunk, terrain));
   const fluid = new FluidSim(world); // before any chunk generation (hooks)
+  const fire = new FireSim(world); // chains onto the fluid change hook
   if (restore) {
     world.loadEdits(restore.edits);
     fluid.loadLevels(restore.waterLevels ?? {});
@@ -174,13 +180,14 @@ function main(): void {
 
   // --- Creator mode (Phase 7) -------------------------------------------
   const BRUSH_SHAPES: BrushShape[] = ['sphere', 'box', 'cylinder', 'noise'];
-  const BRUSH_TOOLS: BrushTool[] = ['place', 'delete', 'paint', 'replace', 'explode'];
+  const BRUSH_TOOLS: BrushTool[] = ['place', 'delete', 'paint', 'replace', 'explode', 'ignite'];
   const TOOL_COLORS: Record<BrushTool, number> = {
     place: 0xffffff, // replaced with the material color at draw time
     delete: 0xff6b57,
     paint: 0xffd75e,
     replace: 0xb07fe0,
     explode: 0xff9944,
+    ignite: 0xff5522,
   };
 
   const prefabs = new PrefabLibrary(store);
@@ -296,6 +303,12 @@ function main(): void {
       doExplosion(hit);
       return;
     }
+    if (brush.tool === 'ignite') {
+      // Ignition is fire-sim state, not an edit: light every flammable
+      // cell the brush shape covers (water-adjacent cells refuse).
+      for (const cell of brushCells(brush, center)) fire.ignite(cell.x, cell.y, cell.z);
+      return;
+    }
     const edits = brushEdits(
       brush,
       center,
@@ -316,12 +329,25 @@ function main(): void {
   const sfx = new SoundFx();
   const debris = new DebrisSystem(engine.scene);
   const dust = new DustSystem(engine.scene);
+  const fireFx = new FireFx(engine.scene);
   const colorFor = (material: VoxelMaterialID) => getMaterial(material).color;
   let explosionSeed = 1;
 
   bus.on('explosion', () => sfx.boom());
   bus.on('structureCollapsed', () => {
     sfx.crack();
+  });
+  fire.onEvent = (event) => bus.emit(event);
+  bus.on('fireIgnited', () => sfx.crack());
+  bus.on('fireExtinguished', (event) => {
+    if (event.cause === 'water') {
+      dust.puff(event.x + 0.5, event.y + 0.5, event.z + 0.5, {
+        count: 6,
+        spread: 0.7,
+        rise: 2.2,
+        size: 0.3,
+      });
+    }
   });
 
   /**
@@ -371,6 +397,7 @@ function main(): void {
     const result = explode(center, radius, voxelQuery, { seed: explosionSeed++, maxDebris: 64 });
     edit(result.edits, 'explode');
     debris.spawn(result.debris, colorFor);
+    fire.heatCells(result.heated); // crater-rim flammables catch (Phase 10)
     dust.puff(center.x, center.y, center.z, {
       count: 36,
       spread: radius * 0.8,
@@ -556,6 +583,7 @@ function main(): void {
         const data = deserializeWorld(saved);
         world.loadEdits(data.edits);
         fluid.loadLevels(data.waterLevels ?? {});
+        fire.reset(); // loads are world resets: no fire survives a load
         history.clear();
         autosave.markDirty();
       } catch (error) {
@@ -651,6 +679,9 @@ function main(): void {
       // activity budget keeps the cost bounded while floods spread.
       fluid.tick(FLUID_CELLS_PER_TICK);
       if (fluid.takeDirty()) autosave.markDirty();
+      // Fire joins the same fixed step and budget scheme (Phase 10).
+      fire.tick(FIRE_CELLS_PER_TICK);
+      if (fire.takeDirty()) autosave.markDirty();
       accumulator -= FIXED_DT;
     }
 
@@ -668,6 +699,8 @@ function main(): void {
     // Destruction particle/physics steps (render-side pools).
     debris.update(frameDt, (x, y, z) => isSolidForCollision(world.getVoxel(x, y, z)));
     dust.update(frameDt);
+    // Fire feedback: embers + smoke emitted from the burning cells.
+    fireFx.update(frameDt, fire.burningList());
 
     // Targeting + edit previews (render only; input handled above).
     const hit = input.isLocked ? targetHit() : undefined;
@@ -747,7 +780,8 @@ function main(): void {
           `seed ${terrain.seed} · ${savedText} · snd ${sfx.enabled ? 'on' : 'off'} · ` +
           `debris ${debris.activeCount}/${debris.capacity}` +
           (player.inWater ? ' · swimming' : '') +
-          (fluid.activeCount > 0 ? ` · water ${fluid.activeCount}` : ''),
+          (fluid.activeCount > 0 ? ` · water ${fluid.activeCount}` : '') +
+          (fire.burningCount > 0 ? ` · fire ${fire.burningCount}` : ''),
       ];
       if (creator.enabled) {
         const b = creator.brush;
@@ -777,6 +811,7 @@ function main(): void {
               hit.voxel.y,
               hit.voxel.z,
               fluid.levelAt(hit.voxel.x, hit.voxel.y, hit.voxel.z),
+              fire.fuelAt(hit.voxel.x, hit.voxel.y, hit.voxel.z),
             )
           : undefined;
         lines.push(formatInspection(inspection));
@@ -796,6 +831,8 @@ function main(): void {
       creator,
       history,
       fluid,
+      fire,
+      fireFx,
       isLocked: () => input.isLocked,
     };
   }

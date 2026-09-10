@@ -16,6 +16,8 @@ export interface VoxelInspection {
   hardness: number;
   /** Fluid level 0–255 when inspecting water, else undefined. */
   water?: number;
+  /** Fuel remaining (ticks) when the cell is burning, else undefined. */
+  burning?: number;
 }
 
 /** Inspect one cell; `query` is usually `world.getVoxel`. */
@@ -25,6 +27,7 @@ export function inspectVoxel(
   y: number,
   z: number,
   waterLevel?: number,
+  burningFuel?: number,
 ): VoxelInspection {
   const material = query(x, y, z);
   const def = getMaterial(material);
@@ -35,13 +38,15 @@ export function inspectVoxel(
     colorHex: def.color,
     hardness: hardnessOf(material),
     water: material === WATER ? (waterLevel ?? 0) : undefined,
+    burning: burningFuel && burningFuel > 0 ? burningFuel : undefined,
   };
 }
 
 /** One-line HUD summary of a cell (or the "no target" placeholder). */
 export function formatInspection(inspection: VoxelInspection | undefined): string {
   if (!inspection) return 'inspect —';
-  const { coords, name, hardness, water } = inspection;
+  const { coords, name, hardness, water, burning } = inspection;
   const waterText = water !== undefined ? ` · water ${water}/255` : '';
-  return `inspect ${coords.x},${coords.y},${coords.z} ${name} · hardness ${hardness.toFixed(2)}${waterText}`;
+  const burnText = burning !== undefined ? ` · burning ${burning} fuel` : '';
+  return `inspect ${coords.x},${coords.y},${coords.z} ${name} · hardness ${hardness.toFixed(2)}${waterText}${burnText}`;
 }

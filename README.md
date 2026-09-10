@@ -6,15 +6,18 @@ and NPCs that react to all of it. Long-term roadmap lives in
 `MICRO_WORLD_DEVELOPMENT_PLAN.md`; session-by-session state lives in
 `MICRO_WORLD_PROGRESS.md`.
 
-**Current state:** Phases 0–9 complete — an infinite streamed world of
+**Current state:** Phases 0–10 complete — an infinite streamed world of
 deterministic seeded terrain that is **editable, saveable, and
 destructible**: brush tools, box selection, clipboard, prefabs, and a
 voxel inspector (creator mode), explosions with material resistance,
 support-aware structural collapse, pooled debris and dust, procedural
-sound, and **flowing water** — cellular fluid with sources, gravity,
-equalization, flow-height rendering, swimming, and save-format v2
-(Milestones 1–7 met; the Phase 8 gate criteria are verified by tests,
-and water mass conservation is tested exactly).
+sound, **flowing water** (cellular fluid with sources, gravity,
+equalization, flow-height rendering, swimming, save-format v2), and
+**fire** — heat-driven ignition and spread, fuel burn-out, water
+extinguishing, explosion heat coupling, pooled embers and smoke
+(Milestones 1–7 met plus fire↔water interaction; the Phase 8 gate
+criteria are verified by tests, and water mass conservation is tested
+exactly).
 
 ## Quickstart
 
@@ -36,10 +39,12 @@ and you respawn. The world autosaves (20 s cadence + when the tab hides)
 and restores on reload; `?seed=1234` starts a different fresh world.
 
 Creator mode (**C**): **LMB** applies the brush, **Q/E** cycle tools
-(place/delete/paint/replace/explode), **V** cycles shapes
+(place/delete/paint/replace/explode/ignite), **V** cycles shapes
 (sphere/box/cylinder/noise), **[ ]** brush size, **B** box-select (two
 clicks) then **Ctrl+C/X/V** copy/cut/paste, **R**/**M** rotate/mirror the
-clipboard, **O/P** save/load prefabs, **I** voxel inspector.
+clipboard, **O/P** save/load prefabs, **I** voxel inspector. **Ignite**
+sets flammable cells on fire (wood/grass burn, water douses), and
+explosions ignite flammables around the crater rim.
 
 ## Scripts
 
@@ -70,6 +75,7 @@ src/voxel/                 World state (no three.js — see ADR-002)
   edits.ts                 EditCommand grouping, undo/redo history, player guard
   raycast.ts               Voxel DDA selection raycast (pure)
   fluid.ts                 Cellular water: levels, sources, sleep/wake, budgeted ticks
+  fire.ts                  Cellular fire: fuel, heat, spread, extinguish (pure)
   damage.ts                Explosion damage fields, debris specs (pure)
   support.ts               Detached-region (collapse) detection (pure)
   persistence.ts           Versioned save schema, migration, autosave policy
@@ -98,6 +104,7 @@ src/render/                The only three.js code (see ADR-002)
   creatorViz.ts            Brush ghost, selection + paste wireframes
   debris.ts                Pooled InstancedMesh debris with mini physics
   dust.ts                  Pooled voxel dust puffs
+  firefx.ts                Pooled embers + smoke particles for burning cells
 src/audio/
   sfx.ts                   Procedural WebAudio destruction sounds (DOM adapter)
 tests/                     Vitest unit tests (node environment)

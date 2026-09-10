@@ -4,6 +4,54 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.8.0] — 2026-09-10 — Phase 10 (Fire and Smoke)
+
+### Added
+
+- Cellular fire simulation (`src/voxel/fire.ts`), mirroring the fluid
+  pattern: a burning cell is a fuel counter; heat is an integer
+  accumulator that only builds in flammable cells. Ignition at
+  `ignitionHeat(flammability)` (derived `MATERIAL_FIRE` balance table
+  next to `MATERIAL_HARDNESS`: wood 0.9/480 ticks, grass 0.55/64 ticks;
+  all else fireproof), so tinder needs a sustained blaze and multiple
+  burning neighbors accelerate the catch. Burning cells deposit heat
+  into flammable neighbors; heat decays when ticked.
+- Fire death rules: adjacent **water extinguishes** (cause `water`,
+  milestone 8 — the water survives); a cell **fully enclosed** by
+  opaque material is smothered (cause `smothered`, fuel survives);
+  spent fuel **burns the voxel to air** through `World.setVoxel` —
+  journaled, remeshed, visible to the fluid sim, persistent across
+  save/load (fires themselves are transient; format stays at v2).
+- Ignition paths: the **ignite tool** (sixth brush tool; lights every
+  flammable cell in the brush shape, refuses water-adjacent cells) and
+  **explosion heat coupling** — `explode()` now returns `heated`
+  (flammable crater-rim survivors) and the game deposits `BLAST_HEAT`
+  on them, so blasts start visible spreading fires (the Phase 8
+  deferred "calculate heat").
+- Event bus additions: `fireIgnited` and `fireExtinguished` (with
+  cause); ignition plays a crack burst, water extinguishing pops a
+  steam-stand-in dust puff.
+- Fire rendering (`src/render/firefx.ts`): pooled InstancedMesh **embers**
+  (256, ballistic arc, sub-second life) and **smoke** (512, buoyant
+  rise, growth, long life); emission scales with the burning-cell count
+  under hard per-frame caps, so large blazes recycle the pools.
+- HUD `· fire N` counter; inspector shows `burning <fuel>`; fire joins
+  the fixed step with a 256-cell budget; `fire.takeDirty()` arms the
+  autosave for burn-out edits; `fire.reset()` on save load.
+- `benchmarks/fire.bench.ts` — budget tick 1.68 ms mean, fire front
+  1.59 ms mean, 20×20 platform burn-out ≈1.0 s total (baselines in
+  `docs/performance.md`).
+- 22 new tests (262 total, 23 files): ignition rules, spread, exact
+  burn durations, water coupling, smothering, blast heat, budget,
+  sleep/wake, determinism (state + world), journal interplay
+  (burned voxels survive chunk regeneration).
+
+### Changed
+
+- `FluidSim` (and `FireSim`) chain onto the World's single
+  `onVoxelChanged` hook instead of overwriting it — sims can be
+  constructed in any order and both observe every world mutation.
+
 ## [0.7.0] — 2026-09-10 — Phase 9 (Water)
 
 ### Added

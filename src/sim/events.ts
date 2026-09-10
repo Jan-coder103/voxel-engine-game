@@ -23,6 +23,20 @@ export type GameEvent =
       z: number;
       /** Voxel cells that detached. */
       cells: number;
+    }
+  | {
+      type: 'fireIgnited';
+      x: number;
+      y: number;
+      z: number;
+    }
+  | {
+      type: 'fireExtinguished';
+      x: number;
+      y: number;
+      z: number;
+      /** Why the fire died (steam puff on water, nothing on smothering). */
+      cause: 'water' | 'smothered';
     };
 
 export type GameEventType = GameEvent['type'];

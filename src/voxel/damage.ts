@@ -1,5 +1,5 @@
 import type { WorldCoordinate } from './coordinates';
-import { AIR, hardnessOf, WATER, type VoxelMaterialID } from './materials';
+import { AIR, fireProfileOf, hardnessOf, WATER, type VoxelMaterialID } from './materials';
 import type { VoxelEdit } from './edits';
 import { hash3 } from './terrain';
 
@@ -16,6 +16,10 @@ import { hash3 } from './terrain';
  * Water (Phase 9) is vaporized within reach — no debris, no resistance —
  * and the fluid system then floods the crater back from surrounding
  * sources.
+ *
+ * Phase 10 heat coupling: flammable cells that survive just outside the
+ * fracture reach are reported in `heated` so the fire sim can ignite them
+ * (the blast is a moving ignition source, not just a hole punch).
  */
 
 /**
@@ -24,6 +28,15 @@ import { hash3 } from './terrain';
  * very edge. cellDist ≤ radius · (CORE + (1−CORE) · (1 − hardness)).
  */
 const CORE_FRACTION = 0.35;
+
+const NEIGHBORS: readonly (readonly [number, number, number])[] = [
+  [1, 0, 0],
+  [-1, 0, 0],
+  [0, 1, 0],
+  [0, -1, 0],
+  [0, 0, 1],
+  [0, 0, -1],
+];
 
 export interface DebrisSpec {
   /** World-space spawn position (voxel units, cell center + jitter). */
@@ -44,6 +57,8 @@ export interface ExplosionResult {
   debris: DebrisSpec[];
   /** Number of solid cells the blast removed (excludes bedrock/water). */
   destroyed: number;
+  /** Flammable survivors at the crater rim — feed to FireSim.heatCells. */
+  heated: WorldCoordinate[];
 }
 
 export interface ExplosionOptions {
@@ -70,6 +85,7 @@ export function explode(
   const edits: VoxelEdit[] = [];
   const hitCells: WorldCoordinate[] = [];
   const hitMaterials: VoxelMaterialID[] = [];
+  const destroyedCells = new Set<string>();
   for (let y = minY; y <= maxY; y++) {
     for (let z = minZ; z <= maxZ; z++) {
       for (let x = minX; x <= maxX; x++) {
@@ -82,11 +98,29 @@ export function explode(
         const reach = radius * (CORE_FRACTION + (1 - CORE_FRACTION) * (1 - hardnessOf(material)));
         if (dist > reach) continue;
         edits.push({ x, y, z, material: AIR });
+        destroyedCells.add(`${x},${y},${z}`);
         // Water vaporizes with no debris; only solids fracture into pieces.
         if (material === WATER) continue;
         hitCells.push({ x, y, z });
         hitMaterials.push(material);
       }
+    }
+  }
+
+  // Heat rim: flammable cells that survived directly beside destroyed
+  // ones. Deterministic scan order, deduplicated across shared neighbors.
+  const heated: WorldCoordinate[] = [];
+  const heatedSeen = new Set<string>();
+  for (const cell of hitCells) {
+    for (const [dx, dy, dz] of NEIGHBORS) {
+      const nx = cell.x + dx;
+      const ny = cell.y + dy;
+      const nz = cell.z + dz;
+      const nKey = `${nx},${ny},${nz}`;
+      if (destroyedCells.has(nKey) || heatedSeen.has(nKey)) continue;
+      if (fireProfileOf(query(nx, ny, nz)).flammability <= 0) continue;
+      heatedSeen.add(nKey);
+      heated.push({ x: nx, y: ny, z: nz });
     }
   }
 
@@ -117,7 +151,7 @@ export function explode(
     });
   }
 
-  return { edits, debris, destroyed: hitCells.length };
+  return { edits, debris, destroyed: hitCells.length, heated };
 }
 
 /**

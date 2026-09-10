@@ -88,17 +88,47 @@ milestone goes here before it goes to the backlog.
   path). Debris pool: 512 pieces, ring-buffer recycling; dust: 1024.
 - **Explosions vaporize water.** Water cells inside the blast are
   edited to air (no debris, not counted as destroyed); surrounding
-  sources then re-flood the crater. Fire coupling (steam/heat) is
-  Phase 10.
-- **No heat, no NPC reaction yet.** The explosion pipeline stops at
-  edits + debris + dust + sound; heat coupling arrives with fire
-  (Phase 10) and NPC reactions with Phase 12/13.
+  sources then re-flood the crater. Since Phase 10 the blast also dumps
+  heat on flammable crater-rim survivors, so explosions can start fires.
+- **No NPC reaction yet.** The explosion pipeline stops at edits +
+  debris + dust + sound (+ fire since Phase 10); NPC reactions are
+  Phase 12/13.
 - **Collapse debris ignores the player.** Falling pieces don't push or
   damage the player; there is no physics body for the player-debris
   interaction (deliberately — believable first).
 - **Sound is procedural WebAudio.** Thud/crack/boom are filtered-noise
   envelopes, not samples; the context starts on the first pointer-lock
   gesture and N mutes. No spatialization yet.
+
+## Fire (Phase 10)
+
+- **Fires do not survive save/load.** Burning cells and heat are
+  transient sim state (the save format stays at v2); a reload starts
+  with no active fire. The _consequences_ persist — burn-out holes are
+  real journaled edits. If persistence is ever wanted: a v3 section
+  mirroring `waterLevels`, plus a fire→v3 migration.
+- **Burn-out does not trigger the support check.** A burned-through
+  pillar leaves its roof floating until the next edit near it runs the
+  check. Structural response to fire arrives with Phase 11's structural
+  graph (replacing the edit-time support approximation), per plan.
+- **No wind, no rain coupling.** The Phase 10 checklist items are
+  deferred until a weather system exists (Phase 15/16); fire currently
+  spreads isotropically via 6-neighbor heat.
+- **Burning voxels keep their material look.** A burning wood block
+  renders as wood; embers + smoke particles carry the fire reading. No
+  emissive tint, no charring texture, no burn-spread decal yet.
+- **Smoke is particle puffs, not volumetric.** Pooled instanced boxes
+  with buoyancy and growth; volumetric ray-marched smoke stays a
+  research item (plan §24).
+- **No fire audio loop.** Ignition plays the procedural crack burst;
+  there is no sustained crackle (audio system is Phase 17).
+- **Oxygen is a 6-neighbor check, not a field.** A fully-enclosed
+  burning cell smothers instantly (fuel survives); partially-enclosed
+  spaces burn normally. Enough for believability; not an air-volume
+  simulation.
+- **Fire is creator-mode-only to start.** The ignite tool and the
+  explosion (heat) path are creator gestures; there is no natural
+  ignition (lightning, lava) yet.
 
 ## GUI verification (headless)
 

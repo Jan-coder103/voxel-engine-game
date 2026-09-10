@@ -22,9 +22,10 @@ export type BrushShape = 'sphere' | 'box' | 'cylinder' | 'noise';
 /**
  * `explode` is the Phase 8 destruction entry point: it is routed to
  * `explode()` in `voxel/damage.ts` (its own edit list + debris), not to
- * `brushEdits`.
+ * `brushEdits`. `ignite` (Phase 10) is likewise routed to the fire sim —
+ * ignition is simulation state, not a voxel edit.
  */
-export type BrushTool = 'place' | 'delete' | 'paint' | 'replace' | 'explode';
+export type BrushTool = 'place' | 'delete' | 'paint' | 'replace' | 'explode' | 'ignite';
 
 export const BRUSH_MIN_SIZE = 1;
 export const BRUSH_MAX_SIZE = 8;

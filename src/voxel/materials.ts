@@ -84,6 +84,32 @@ export function hardnessOf(id: VoxelMaterialID): number {
   return MATERIAL_HARDNESS[id] ?? 0.5;
 }
 
+/**
+ * Fire behavior (Phase 10): how readily a material ignites and how long a
+ * burning cell of it keeps burning. A derived balance table like
+ * MATERIAL_HARDNESS — not part of the serialized registry. Materials
+ * absent from the table are fireproof.
+ */
+export interface FireProfile {
+  /** Relative ease of ignition in [0, 1]; 0 = non-flammable. */
+  readonly flammability: number;
+  /** Ticks of fuel one burning cell of this material provides. */
+  readonly burnDuration: number;
+}
+
+const MATERIAL_FIRE: Readonly<Record<number, FireProfile>> = {
+  // Grass is tinder: catches slowly, burns out fast. Wood is the fuel
+  // backbone: hard to start from a single spark but burns a long time.
+  [GRASS]: { flammability: 0.55, burnDuration: 64 },
+  [WOOD]: { flammability: 0.9, burnDuration: 480 },
+};
+
+const FIREPROOF: FireProfile = { flammability: 0, burnDuration: 0 };
+
+export function fireProfileOf(id: VoxelMaterialID): FireProfile {
+  return MATERIAL_FIRE[id] ?? FIREPROOF;
+}
+
 /** Bump when the serialized table layout changes (not when entries are added). */
 export const MATERIAL_FORMAT_VERSION = 1;
 

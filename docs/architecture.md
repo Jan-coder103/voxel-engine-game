@@ -1,6 +1,6 @@
 # Architecture
 
-Scope: what exists now (Phases 0–8) plus the boundaries already fixed for
+Scope: what exists now (Phases 0–10) plus the boundaries already fixed for
 later phases. The full decision log lives in
 `MICRO_WORLD_PROGRESS.md` (ADR-001…005); this document explains the
 practical consequences for code layout.
@@ -89,10 +89,10 @@ undo/redo, journaling, and autosave come free.
 - **Brush core** (`brush.ts`): shapes (sphere/box/cylinder/noise — the
   noise variant masks a sphere with `hash3`, the terrain integer hash,
   so scatter is deterministic with no RNG state) × tools
-  (place/delete/paint/replace; `explode` routes to the damage module).
-  Shape tests use cell centers; bedrock (y ≤ 0) is never touched; a
-  caller-supplied `excludes` predicate enforces the player-overlap guard
-  for placement.
+  (place/delete/paint/replace; `explode` routes to the damage module;
+  `ignite` routes to the fire sim — Phase 10). Shape tests use cell
+  centers; bedrock (y ≤ 0) is never touched; a caller-supplied
+  `excludes` predicate enforces the player-overlap guard for placement.
 - **Selection** (`selection.ts`): two clicked corners normalize into an
   inclusive min/max box; `copyRegion` snapshots it into a dense
   `Uint16Array` (same flat layout as `VoxelVolume`). Selections above
@@ -139,9 +139,10 @@ procedural audio. Believability over accuracy (plan §26/§105).
   command (debris specs captured before the edit, since they need the
   cells' materials).
 - **Event bus** (`src/sim/events.ts`): typed `GameEvent` union
-  (`explosion`, `structureCollapsed`), synchronous dispatch, one handler
-  throwing doesn't block the rest (ADR-003 — the backbone future
-  physics/AI/audio/scripting subscribe through).
+  (`explosion`, `structureCollapsed`, `fireIgnited`, `fireExtinguished`),
+  synchronous dispatch, one handler throwing doesn't block the rest
+  (ADR-003 — the backbone future physics/AI/audio/scripting subscribe
+  through).
 - **Debris/dust** (`src/render/debris.ts`, `src/render/dust.ts`): each
   is ONE `THREE.InstancedMesh` with a fixed pool (512 debris, 1024 dust)
   and ring-buffer recycling — destruction can never accumulate objects.
@@ -211,6 +212,61 @@ not user intent — otherwise undo history would flood).
   lakes are derivable), with v1→v2 migration and structural validation.
   `exportLevels`/`loadLevels` are the fluid-side (de)serializers;
   flowed water marks the autosave dirty via `fluid.takeDirty()`.
+
+## Fire (Phase 10)
+
+A pure cellular fire sim (`src/voxel/fire.ts`) mirroring the fluid
+pattern: budgeted ticks, sleep/wake, integer rules, no RNG. Believability
+over accuracy — there is no temperature field or oxygen meter.
+
+- **Cells, not fields.** A burning cell is a fuel counter (ticks
+  remaining) in a sparse `Map`; heat is an integer accumulator that only
+  ever builds in flammable cells (`fireProfileOf` — a derived
+  `MATERIAL_FIRE` balance table next to `MATERIAL_HARDNESS`: wood
+  flammability 0.9 / 480 ticks, grass 0.55 / 64 ticks; everything else is
+  fireproof). A cell ignites when its heat reaches
+  `ignitionHeat(flammability)` (= `IGNITION_BASE · (1 − flammability)`,
+  min 1), so tinder needs a sustained blaze and several burning neighbors
+  accelerate the catch. Burning cells deposit `HEAT_PER_TICK` into each
+  flammable non-burning neighbor; ticked cells shed `HEAT_DECAY`.
+- **Death rules.** A burning cell dies (event `fireExtinguished`) next to
+  **water** — any adjacent WATER-material cell, source or flowing — or
+  when **fully enclosed** by opaque material (no air access; the fuel
+  survives). When fuel runs out the cell **burns out**: the voxel becomes
+  air through `World.setVoxel`, so the destruction is journaled,
+  remeshed, visible to the fluid sim, and persists across save/load —
+  fires themselves are transient state and do not survive a load
+  (deliberate; the save format stays at v2).
+- **Ignition paths.** The creator **ignite tool** lights every flammable
+  cell in the brush shape (refuses water-adjacent cells); explosions
+  return `heated` — flammable survivors at the crater rim — and the game
+  dumps `BLAST_HEAT` on them, so a blast leaves a spreading fire instead
+  of popping one in. Heat-coupled ignition goes through the same
+  threshold path as any other fire.
+- **Activity + determinism.** Identical shape to the fluid sim:
+  insertion-ordered `active` set, `tick(budget)` (game: 256 cells per
+  fixed step, joining the fluid's budget in the same fixed step), a
+  sleeping cell costs nothing, and any write near a cell (edit, undo,
+  fluid, collapse) re-wakes it via the World's `onVoxelChanged` hook.
+  Both sims chain onto that single hook (whoever is constructed later
+  wraps the earlier hook — construction order is fire _after_ fluid by
+  convention, but the chain makes it harmless either way). Same edit/
+  tick sequence → same fire, unit-tested.
+- **Rendering** (`src/render/firefx.ts`): two pooled InstancedMeshes —
+  embers (small bright boxes, ballistic arc, sub-second life) and smoke
+  (dark boxes, buoyant rise, growth, long life). Emission scales with
+  the burning-cell count under hard per-frame caps (12 embers / 8 smoke)
+  so a huge blaze recycles the same pools. Burning voxels keep their
+  material; particles are the fire's visual. Water extinguishing pops a
+  small dust puff (steam stand-in) via the event bus.
+- **Interactions.** Fire ↔ water is milestone 8: adjacent water
+  extinguishes and survives; fluid flow into a burning cell (or a
+  player's water dump) kills it through the same hook. Burn-out holes
+  are journaled edits — but they do NOT trigger the support check yet
+  (a burned pillar won't collapse its roof until Phase 11's structural
+  graph replaces the edit-time approximation).
+- **HUD/inspector.** A `· fire N` counter appears while anything burns;
+  the voxel inspector shows `burning <fuel>` for a burning cell.
 
 ## Chunk meshing and streaming
 
@@ -314,11 +370,16 @@ depth write so lake beds stay visible.
   validation, corrupt-prefab handling), destruction (damage falloff by
   hardness, bedrock/water immunity, determinism, debris caps, support
   fixtures: pillar-roof collapse, boundary anchoring, budget skip,
-  event-bus delivery, and the 100-event debris-pool stress test).
+  event-bus delivery, and the 100-event debris-pool stress test), fire
+  (ignition rules, spread, exact burn durations, water coupling,
+  smothering, blast heat, budget, sleep/wake, determinism, journal
+  interplay).
 - Benchmarks: `benchmarks/mesher.bench.ts` (naive vs greedy, solid/
   checker/layered/terrain), `benchmarks/storage.bench.ts` (dense vs
   packed), `benchmarks/terrain.bench.ts`, `benchmarks/destruction.bench.ts`
-  (blast fields, support checks). Baselines in `docs/performance.md`.
+  (blast fields, support checks), `benchmarks/fluid.bench.ts` (budget
+  tick, flood scenarios), `benchmarks/fire.bench.ts` (budget tick, fire
+  front, full burn-out scenario). Baselines in `docs/performance.md`.
 - Headless GUI verification: `.verify/run.mjs` (local, gitignored)
   drives the real game in Playwright Chromium through the dev-only
   `__mw` hook — pointer lock, brush strokes, selection/clipboard/

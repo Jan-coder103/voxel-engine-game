@@ -120,6 +120,26 @@ worst case — a puddle cascading across a floor?
   frontier — a failed unloaded-chunk write still re-activated its
   neighborhood; fixed and regression-tested in `tests/fluid.test.ts`.)
 
+## Baselines — fire (`benchmarks/fire.bench.ts`)
+
+2026-09-10, same machine. The budget question mirrors the fluid sim: one
+`tick` at the game's fire budget (256 cells, 60 Hz fixed steps) inside a
+16 ms frame, including the expensive case — a fire front spreading into
+fresh fuel (heat deposits + ignitions on top of steady burning).
+
+| Scene                                               | ≈ time/op                                        |
+| --------------------------------------------------- | ------------------------------------------------ |
+| tick — 256 burning slab cells (game budget)         | 1.68 ms mean, p75 1.51 ms                        |
+| tick — fire front: slab burning into a grass field  | 1.59 ms mean, p75 1.63 ms                        |
+| scenario — 20×20 wood platform burns out completely | ≈ 1.0 s total (~500 ticks ≈ 2 ms/tick amortized) |
+
+Reading: the fire budget stays at 256 — a full-budget tick costs about
+as much as the fluid's (fire touches 6 neighbors per burning cell but
+heat is only deposited into flammable cells). The burn-out scenario is a
+one-time ~1 s of total sim work spread across the fire's whole life; the
+5 s of embers/smoke afterward cost a pool-bounded particle step (same
+class as debris/dust: 256 embers + 512 smoke instances, capped emission).
+
 ## Runtime (dev session, Phase 5–8 demo)
 
 - 60 fps (vsync-capped) in the in-app browser at 1280×720 with render

@@ -31,23 +31,92 @@
 
 ## Overall Phase
 
-**Current phase:** Phase 9 (Water) — **complete and committed** (implementation, verification, docs)
+**Current phase:** Phase 10 (Fire and Smoke) — **complete and committed** (implementation, verification, docs)
 
-**Current milestone:** Milestones 1–7 met (through water). Milestone 7: "Water can flow through the world" — flow, conservation, rendering, swimming, persistence all verified.
+**Current milestone:** Milestones 1–7 met plus Milestone 8: "Fire and water interact" — ignition/spread/burn-out, water extinguishing (both directions), explosion heat coupling, ember/smoke rendering all verified.
 
-**Overall completion:** ~40% (Phases 0–9 done; deferred water sub-items: pressure, worker fluid, GPU fluid, debug overlay)
+**Overall completion:** ~45% (Phases 0–10 done; deferred fire sub-items: wind/rain coupling (needs weather), fire persistence in saves, fire→structural collapse coupling (Phase 11), volumetric smoke, sustained fire audio)
 
-**Last completed task:** Session 005 (2026-09-10) — finished Phase 9: fluid benchmark run + baselines recorded; all gates re-run green (240 tests, typecheck, lint, build); **found and fixed a real fluid bug via headless browser verification** (frontier cells re-activated forever after a failed unloaded-chunk write — lakes churned ~10³ cells permanently and starved the 384-cell budget; now they sleep, regression-tested); full headless verification suite extended with a 14-check water scenario (source placement, spread, containment, exact mass conservation, quiescence, swim, climb-out, save-v2 boot restore) — all green; docs updated (architecture Water section, performance baselines, known-issues rewrite, README, CHANGELOG 0.7.0).
+**Last completed task:** Session 006 (2026-09-10) — implemented Phase 10: pure `FireSim` in `src/voxel/fire.ts` following the fluid pattern (fuel counters + integer heat accumulator, `MATERIAL_FIRE` derived table, budgeted 256-cell ticks, sleep/wake, deterministic); water extinguishing + full-enclosure smothering; burn-out through `World.setVoxel` (journaled, persists); ignite tool (6th brush tool) + explosion heat coupling (`explode()` returns `heated` crater-rim cells); `fireIgnited`/`fireExtinguished` events; pooled ember + smoke particles (`src/render/firefx.ts`); HUD counter + inspector fuel; 22 fire tests (262 total); fire benchmark baselines (budget tick 1.68 ms); headless browser verification — 13-check fire scenario all green (tool click ignition, containment, spread, burn-out, quiescence, water dousing); also fixed a real FireFx bug caught by the harness (unfilled particle state arrays crashed the frame loop — probe-verified, zero page errors after).
 
 **Current task:** None — session complete, work committed.
 
 **Blocked by:** Nothing.
 
-**Next recommended action:** **Phase 10 (Fire and Smoke)** per the plan: temperature/fuel/ignition/spread with `hardnessOf`-style derived tables; the Phase 8 event bus is the integration backbone and water coupling (extinguish) is the first cross-system test. Phase 11 then replaces the support-check approximation.
+**Next recommended action:** **Phase 11 (Structural Simulation)** per the plan: real support graph replacing the Phase 8 edit-time support-check approximation; its checklist includes the collapse gate (destroy ground floor → upper floors fall as rigid bodies), incremental analysis (< 5 ms for house scale), and the fire→collapse coupling deferred from Phase 10.
 
 ---
 
 # Session Log
+
+## Session 006 — 2026-09-10
+
+**Status:** Complete — Phase 10 (Fire and Smoke) done, verified, documented, committed. Milestone 8 met.
+
+### Completed
+
+- [x] Pure fire core (`src/voxel/fire.ts`): burning cells = fuel counters in a sparse map; heat = integer accumulator only in flammable cells (`MATERIAL_FIRE` derived table + `fireProfileOf` next to `MATERIAL_HARDNESS`; wood 0.9/480 ticks, grass 0.55/64, rest fireproof). Ignition at `ignitionHeat(flammability)`; burning cells deposit `HEAT_PER_TICK` into flammable neighbors; ticked cells decay. Insertion-ordered active set, `tick(budget)` (256/fixed step), sleep/wake via the World hook — same shape as the fluid sim, fully deterministic (no RNG).
+- [x] Death rules: adjacent water extinguishes (cause `water`); full 6-neighbor opaque enclosure smothers (cause `smothered`, fuel survives); fuel spent → **burn-out** to AIR through `World.setVoxel` — journaled + remeshed, fluid-visible, persists across save/load (fires themselves transient; format stays v2).
+- [x] Ignition paths: ignite tool (6th BrushTool; lights all flammable cells in the brush shape, refuses water-adjacent) + explosion heat: `explode()` returns `heated` (flammable crater-rim survivors), main dumps `BLAST_HEAT` on them — the Phase 8 deferred "calculate heat" hook.
+- [x] Events: `fireIgnited` / `fireExtinguished` (typed union entries); crack burst on ignition, steam-stand-in dust puff on water extinguish. `FireSim.onEvent` callback keeps the pure core bus-agnostic.
+- [x] Rendering (`src/render/firefx.ts`): pooled embers (256, ballistic, sub-second) + smoke (512, buoyant, growing); emission ∝ burning cells under per-frame caps. HUD `· fire N`, inspector `burning <fuel>`, `fire.takeDirty()` arms autosave, `fire.reset()` on load.
+- [x] Sim-hook hardening: `FluidSim` and `FireSim` both chain onto `world.onVoxelChanged` (wrap, don't overwrite) — construction order no longer matters.
+- [x] Tests: `tests/fire.test.ts` — 22 tests (262 total, 23 files): ignition rules, non-flammable immunity, spread, non-crossing barriers, exact burn durations (64/480), burn-out journaling + chunk-regeneration survival, water coupling both ways, smothering, blast heat (flammable/stone), `explode().heated` rim report, budget, sleep/wake, determinism (exportState + world voxels), events, reset.
+- [x] Fire benchmark (`benchmarks/fire.bench.ts`): budget tick **1.68 ms** mean (p75 1.51); fire front **1.59 ms**; 20×20 platform full burn-out ≈ **1.0 s** total (~2 ms/tick amortized). Budget stays 256. Baselines in `docs/performance.md`.
+- [x] Gates green: typecheck (strict), lint, build (three.js chunk unchanged), Prettier, full suite **262 tests**.
+- [x] Headless browser verification (Playwright + SwiftShader, `.verify/run.mjs`): new Phase 10 fire section on a fresh `?seed=5678` world — **13 checks, all green**: dry spot fixture (5×5 grass patch + dirt apron), ignite tool via Q/E, click lights the patch, HUD fire counter, ember+smoke pools emit, spread beyond the ignition sphere (corners), fire dies out and sim sleeps, patch burns away to air, dirt apron contained the fire, wood ignites (direct sim call), **adjacent water extinguishes (milestone 8)**, doused wood survives. Zero console errors.
+- [x] Docs: architecture "Fire (Phase 10)" section, performance fire baselines, known-issues new Fire section (8 entries) + updated destruction bullets, README (Phases 0–10, ignite tool, layout), CHANGELOG `[0.8.0]`, this file.
+
+### Fixed during verification
+
+- **FireFx crashed the frame loop**: the rewritten particle system never filled its per-pool state arrays — every spawn indexed an empty array, throwing "Cannot read properties of undefined (reading 'active')" per frame (found via the harness's pageerror flood + a minimal probe with stack traces; invisible in unit tests because `FireFx` is render-side and untested by design). Pools now pre-fill their states in the constructor; probe confirms embers/smoke emit with zero page errors.
+- **Harness**: the fire section initially clicked from beyond `EDIT_REACH` (stray ignition of wild terrain) — the fixture now teleports the player beside the patch and aims → verify → click in one retried step; `ensureCreator(true)` added after ctrl combos (a mangled Ctrl+C toggles creator mode off, silently no-oping all later creator keys).
+
+### Verification lessons (for future sessions)
+
+- Render-side systems (`FireFx`, `DustSystem`, `DebrisSystem`) are the one place unit tests don't reach — the headless harness is their only test. A per-frame throw there floods the HUD away and only shows as a pageerror list; read the ERRORS tail first when a run looks wrong.
+- The `__mw` hook + a small probe script (boot → poke state → listen for pageerror with stacks) finds render-loop crashes in one minute; worth doing before any full 5-minute harness run.
+- Verify the crosshair's actual hit cell (page-side `hitCell`) before any single-shot tool click — ray reach is 6 and the eye can still be settling after teleports.
+
+### Deferred deliberately
+
+- Wind/rain coupling (checklist items) — no weather system until Phase 15/16.
+- Fire state in saves (needs format v3; consequences already persist via the journal), fire→structural collapse coupling (Phase 11's graph replaces the edit-time support check), volumetric smoke, sustained fire audio (Phase 17), natural ignition sources (lightning/lava).
+- Manual GUI pass for Phase 7–10 polish (user); headless Phase 7/8 input-race flakes remain harness-side (mix varies per run; collapse gate, prefab, conservation, and all fire checks hold).
+
+### Tests
+
+- Unit tests: 262 passed (23 files, +22 fire tests)
+- Integration: headless browser suite incl. 13-check fire scenario (all green); Phase 7/8 synthetic-input flakes remain (documented); manual GUI pass pending (user)
+- Typecheck: clean (strict) · Lint: clean · Build: succeeds (three.js chunk unchanged, ~585 kB minified / ~153 kB gzip)
+
+### Benchmarks
+
+- Fire: budget tick 1.68 ms mean (p75 1.51); fire front 1.59 ms; 20×20 burn-out ≈1.0 s total — `docs/performance.md`
+- FPS: unchanged when idle (fire sleeps); particles are pool-bounded like debris/dust
+
+### Architecture changes
+
+- New: `src/voxel/fire.ts` (pure), `src/render/firefx.ts` (pools). `MATERIAL_FIRE` + `fireProfileOf` in materials.ts; `BrushTool` gains `'ignite'`; `explode()` returns `heated`; events union extended.
+- `onVoxelChanged` consumers now chain instead of overwrite (fluid + fire).
+- No layering changes: fire is pure; FX consume a plain point list per frame.
+
+### Known issues
+
+- `docs/known-issues.md`: new Fire section (no save persistence, no structural coupling until Phase 11, no wind/rain, material-look burning voxels, particle-only smoke, no sustained audio, 6-neighbor oxygen approximation, creator-only ignition).
+
+### Next task
+
+- Task: Phase 11 — Structural Simulation (support graph, stress, collapse, detached rigid bodies)
+
+### Recommended next steps
+
+1. Support graph in `src/voxel/structure.ts` (pure): nodes per solid component with connection strengths; incremental local rebuilds on edit (budget: < 5 ms house scale) replacing `checkSupport`'s region approximation.
+2. Detachment → rigid bodies: route collapsed components through the existing debris pipeline first (believable), evaluate Rapier only if debris needs true collisions (Phase 8 note).
+3. Wire fire burn-outs into the graph (the Phase 10 deferred coupling): a burned pillar should drop its roof like a deleted one.
+4. Collapse gate test: destroy a building's ground floor → upper floors detach and settle (plan §109).
+
+---
 
 ## Session 005 — 2026-09-10
 
@@ -797,30 +866,30 @@ pickup instructions in `HANDOFF.md`.
 
 ## Fire
 
-- [ ] Implement temperature
-- [ ] Implement fuel
-- [ ] Implement oxygen
-- [ ] Implement ignition
-- [ ] Implement spread
-- [ ] Implement material burn rates
-- [ ] Implement extinguishing
-- [ ] Couple fire to water
-- [ ] Couple fire to wind
-- [ ] Couple fire to rain
+- [x] Implement temperature _(believable-over-accurate: heat is an integer accumulator that builds only in flammable cells — no temperature field; ignitionHeat(flammability) thresholds)_
+- [x] Implement fuel _(burning cell = fuel counter in ticks from the derived MATERIAL_FIRE table: wood 480, grass 64)_
+- [x] Implement oxygen _(6-neighbor approximation: a fully-enclosed burning cell is smothered — no air-access field)_
+- [x] Implement ignition _(heat ≥ threshold ignites; ignite tool + explosion BLAST_HEAT coupling)_
+- [x] Implement spread _(burning cells deposit HEAT_PER_TICK into flammable 6-neighbors; fixed order, deterministic)_
+- [x] Implement material burn rates _(MATERIAL_FIRE derived table: flammability + burnDuration per material; fireproof default)_
+- [x] Implement extinguishing _(adjacent water → cause 'water'; full enclosure → cause 'smothered'; fireExtinguished events)_
+- [x] Couple fire to water _(milestone 8: adjacent water extinguishes and survives; fluid flow into fire kills it via the world hook; steam puff)_
+- [ ] Couple fire to wind _(deferred — no weather system until Phase 15/16)_
+- [ ] Couple fire to rain _(deferred — no weather system until Phase 15/16)_
 
 ## Smoke
 
-- [ ] Implement smoke source
-- [ ] Implement particle smoke
-- [ ] Implement buoyancy
-- [ ] Implement smoke density
-- [ ] Add smoke rendering
-- [ ] Add smoke debug visualization
-- [ ] Investigate volumetric smoke
+- [x] Implement smoke source _(burning cells emit; FireFx update consumes the sim's burning list)_
+- [x] Implement particle smoke _(pooled InstancedMesh, 512 smoke + 256 embers, src/render/firefx.ts)_
+- [x] Implement buoyancy _(smoke rises with acceleration + damped drift; embers arc under gravity)_
+- [x] Implement smoke density _(emission ∝ burning-cell count with hard per-frame caps; pool recycling)_
+- [x] Add smoke rendering _(dark voxel-styled boxes, growth + lifetime; fire screenshots in .verify/artifacts/)_
+- [x] Add smoke debug visualization _(HUD `· fire N` counter + inspector `burning <fuel>`; pool counts exposed on __mw)_
+- [ ] Investigate volumetric smoke _(deferred — research item, plan §24)_
 
 ### Milestone
 
-- [ ] **Milestone 8 complete: Fire and water interact**
+- [x] **Milestone 8 complete: Fire and water interact** _(met — adjacent water extinguishes burning cells (and survives), fluid writes kill fire through the world hook, fire burn-outs flow with water; unit-tested and verified in the headless browser)_
 
 ---
 
@@ -1261,8 +1330,8 @@ Only after core deterministic simulation is stable.
 
 - [x] Fluid approximately conserves mass _(exact in closed basins — tests/fluid.test.ts + in-browser containment/conservation checks, Session 005)_
 - [x] Fluid boundary conditions are stable _(solid containment, world edges, frontier sleep — tests/fluid.test.ts, Session 005)_
-- [ ] Fire cannot ignite nonflammable materials
-- [ ] Fire extinguishes correctly
+- [x] Fire cannot ignite nonflammable materials _(tests/fire.test.ts: stone/sand/dirt/air refuse ignition; barriers stop spread; heatCells on stone is a no-op — Session 006)_
+- [x] Fire extinguishes correctly _(adjacent water → extinguished + water survives; full enclosure smothers without consuming; exact burn-out after burnDuration — tests/fire.test.ts, Session 006)_
 - [x] Unsupported structures become unstable _(pillar-roof collapse fixture — tests/support.test.ts, Session 004)_
 - [x] Detached structures are not simulated as intact _(collapses as one command with debris specs — Session 004)_
 - [ ] Simulation remains stable under extreme edits
@@ -1277,7 +1346,7 @@ Only after core deterministic simulation is stable.
 - [ ] Large paste _(32³ budget-capped; grouped single command — Session 004)_
 - [x] Large explosion _(100-event explosion stress: pool capped, stable — tests/debrisPool.test.ts, Session 004)_
 - [x] Large flood _(22×22 basin source-flood benchmark: settles in ≈2.7 s inside the budget; 384-cell budget tick 2.6 ms — Session 005)_
-- [ ] Large fire
+- [x] Large fire _(20×20 wood platform burns out completely in ≈1.0 s of total sim work (~2 ms/tick amortized); full-budget tick 1.68 ms — benchmarks/fire.bench.ts, Session 006)_
 - [ ] Many NPCs
 - [ ] Many chunks loading/unloading
 
@@ -1296,7 +1365,7 @@ Only after core deterministic simulation is stable.
 - [ ] Serialization
 - [x] Physics _(player controller notes in architecture — Player physics section)_
 - [x] Fluids _(architecture "Water (Phase 9)" — sim, hooks, rendering, swim, save v2)_
-- [ ] Fire
+- [x] Fire _(architecture "Fire (Phase 10)" — cells/heat model, death rules, ignition paths, budget, rendering, interactions)_
 - [ ] Structures
 - [ ] NPCs
 - [ ] Navigation
