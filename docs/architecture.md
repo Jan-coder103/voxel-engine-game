@@ -322,9 +322,10 @@ approximation with a ticked, budgeted sim over a graph of solid cells
 
 `src/npc/` adds a small population of wandering figures: a pure
 simulation (`npc.ts`) over the navigation queries and A\* in
-`navigation.ts`, mirrored into one pooled InstancedMesh by
-`src/render/npcViz.ts`. Believability over accuracy, plan §37/§110:
-there are no rigid bodies, no animation, no perception yet.
+`navigation.ts`, with the perception geometry of Phase 13 in
+`perception.ts`, mirrored into one pooled InstancedMesh by
+`src/render/npcViz.ts`. Believability over accuracy, plan §37/§110/§111:
+there are no rigid bodies and no animation.
 
 - **Navigation** treats every standable cell as a graph node — the
   graph is implicit in the voxel grid, so edits never require a nav
@@ -373,13 +374,66 @@ there are no rigid bodies, no animation, no perception yet.
   bit-identical populations, paths, and schedules (unit-tested).
 - **Rendering** (`src/render/npcViz.ts`): one InstancedMesh of
   capsules, tinted by activity (green wandering, yellow commuting,
-  slate idle, dark blue asleep; sleepers lie down), updated per frame
-  from `sim.list()`. Same pool discipline as debris/dust (ADR-004).
-- **Reaction hooks for Phase 13**: the bus already carries
-  `explosion`, `structureCollapsed`, `fireIgnited`; the sim's
-  invalidation hook already reacts to collapse-shaped world changes.
-  Perception (vision/hearing) and fear/flee/investigate behaviors land
-  next.
+  slate idle, dark blue asleep, red fleeing, teal investigating;
+  sleepers lie down), updated per frame from `sim.list()`. Same pool
+  discipline as debris/dust (ADR-004).
+
+## NPC reactions (Phase 13)
+
+Phase 13 closes the loop opened in Phase 12: the world's destruction
+events now _matter_ to the figures living in it (plan §111). New pure
+perception geometry lives in `src/npc/perception.ts`; behavior stays in
+`npc.ts`.
+
+- **Perception — vision**: `canSee` = range (`SIGHT_DISTANCE`, 24
+  cells) × horizontal field of view (130°, the movement yaw convention)
+  × voxel line of sight (the Phase 5 DDA reused with a
+  solids-block-sight predicate; the ray stops ~0.75 cells short of the
+  target so a burning block doesn't occlude itself — water never blocks).
+- **Perception — hearing**: no propagation field — each event kind has a
+  hear-radius formula (explosion `radius·4 + 20`, collapse
+  `min(60, 20 + 2·√cells)`), and a figure hears it iff it is inside.
+  Believably lossy, O(figures) per event.
+- **Threat memory**: a capped `ThreatBoard` (12) of event sites with
+  tick expiries (blast/collapse 400, fire 600, water 150), deduplicated
+  by kind within 4 cells — one spreading blaze is one threat, not one
+  per ignited cell. It feeds both vision scans and flee targeting.
+- **Reactions enter through `NpcSim.notify(event)`** — main wires the
+  bus's `explosion` / `structureCollapsed` / `fireIgnited` to it.
+  `explosion` also applies damage: distance falloff inside
+  `radius + 3`, lethal within half that (the crater), **quarter damage
+  when line of sight is blocked** (walls really do shield). Death
+  despawns the figure and emits a new `npcDied` bus event (cause
+  `explosion` | `drowned` — the Phase 12 water-sweep now reports too)
+  for Phase 17+ audio/scripts. Malformed (non-finite) events are
+  dropped at the door: NaN survives `Math.min`/`Math.max` and would
+  permanently poison fear.
+- **Fear** (0–100 per figure) rises with proximity and what the figure
+  perceived (heard-only events count less; seen threats add more, but
+  only within `ALARM_RADIUS` = 12 cells — a distant blaze is scenery
+  until you are near it, which is what lets an investigator actually
+  reach the site). It decays ~0.1/tick, so panic subsides in seconds of
+  real time. At `PANIC_THRESHOLD` (50) the schedule is overridden:
+  - **`flee`** — path away from the nearest remembered threat (14–20
+    cells, per-figure hash jitter ±~31° so crowds don't funnel), at
+    `FLEE_SPEED_MULT` 1.6×; arrivals catch breath briefly and re-decide
+    while fear stays high; sleepers wake. Nowhere to run → cower in
+    place and retry; hemmed in → run for home.
+  - **`investigate`** — heard but not frightening: path to a stop-short
+    anchor ≤ 4 cells from the site, stand and look (100–220 ticks).
+    Approaching inside the alarm radius converts the arc into the
+    plan §42 chain — investigate → _see_ destruction → fear spike →
+    flee.
+- **Flood response** has no bus event: the staggered perception scans
+  (`SCAN_PERIOD` = 10 ticks, offset by id) check the feet cell and its
+  four neighbors for water — water at the feet is +60 fear and flight.
+  The same scans wake sleepers for any threat within 5 cells (noise and
+  heat ignore closed eyes), and sight gains keep a figure panicking
+  while the threat stays visible.
+- **Determinism**: all choice (jitter, flee distance, arrival waits)
+  hashes (id, salt, tick, seed) as everywhere else; identical event
+  sequences tick identically (unit-tested), and a NaN-event guard keeps
+  that true even from hostile input.
 
 ## Chunk meshing and streaming
 

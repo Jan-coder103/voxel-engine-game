@@ -20,10 +20,13 @@ or pier, overstressed columns fracture under load with natural terrain
 exempt, collapses cascade progressively, burned-through pillars drop
 their roofs), and **NPCs** — a deterministic wandering population with
 a day/night schedule (work, leisure, sleep at home), needs, A\*
-navigation over the voxel grid with edit-driven re-paths, and figures
-that fall when the ground under them vanishes (Milestones 1–8 met; the
-Phase 8, 9 and 11 gate criteria are verified by tests, benchmarks, and
-headless browser runs; NPC perception and event reactions are Phase 13).
+navigation over the voxel grid with edit-driven re-paths, figures that
+fall when the ground under them vanishes, and **reactions**: figures
+see (range + FOV + line of sight) and hear explosions, collapses, and
+fires, take blast damage (walls shield), feel fear, flee in panic,
+investigate distant noises, and run from rising water (Milestones 1–10
+met; the Phase 8, 9 and 11 gate criteria are verified by tests,
+benchmarks, and headless browser runs).
 
 ## Quickstart
 
@@ -102,7 +105,8 @@ src/sim/
   events.ts                Typed game event bus (ADR-003)
 src/npc/                   NPC simulation (pure — no three.js)
   navigation.ts            Walkable-cell queries, A* (implicit grid graph)
-  npc.ts                   NpcSim: schedule, needs, wander, population, re-paths
+  npc.ts                   NpcSim: schedule, needs, fear/flee/investigate, population
+  perception.ts            Vision (range/FOV/LOS), hearing radii, threat memory
 src/player/
   controller.ts            Pure physics: look, gravity, AABB per-axis collision
   input.ts                 DOM keyboard + pointer-lock mouse

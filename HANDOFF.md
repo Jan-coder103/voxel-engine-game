@@ -1,108 +1,112 @@
-# HANDOFF — Session 008 wrap (2026-09-11)
+# HANDOFF — Session 009 wrap (2026-09-11)
 
-**Status: Phase 12 (NPCs) is COMPLETE — implemented, verified, documented,
-and committed. 309 unit tests green; typecheck/lint/prettier clean; the
-headless browser suite's Phase 12 NPC section is 10/10 green across two
-runs (zero page errors). Canonical long-term state lives in
-`MICRO_WORLD_PROGRESS.md` (Session 008 log + Current Status); this file
+**Status: Phase 13 (NPC Reactions) is COMPLETE — implemented, verified,
+documented, and committed. 330 unit tests green; typecheck/lint/prettier
+clean; build succeeds. The headless browser suite's Phase 13 NPC-reaction
+section is 9/9 green in two consecutive runs (zero page errors
+throughout). Canonical long-term state lives in
+`MICRO_WORLD_PROGRESS.md` (Session 009 log + Current Status); this file
 is the short pickup map.**
 
 **⚠ First command of every shell: `export PATH="$HOME/.local/bin:$PATH"`**
 (npm/node live in `~/.local/opt`, linked from `~/.local/bin`).
 
-## What landed this session (Phase 12 — NPCs)
+## What landed this session (Phase 13 — NPC Reactions, plan §111)
 
-1. **`src/npc/navigation.ts`** (pure): walkable-cell queries + A\* over
-   the implicit grid graph — there is no nav structure to rebuild after
-   edits (plan §40). A cell is walkable when it and the cell above are
-   open (not solid, **not water**) and the cell below is solid; moves
-   are flat, +1, or drops ≤ `MAX_DROP = 3` with a lip-clearance rule so
-   deep drops must fall clear past the ledge. Manhattan heuristic +
-   insertion-order tie-breaks = deterministic optimal paths;
-   `maxExpansions` budget bounds hopeless searches. `nearestWalkable`
-   (±4 y window) anchors spawns/goals; `pathTouches` is the
-   invalidation helper (checks path cells AND their floors).
-2. **`src/npc/npc.ts`** (pure): `NpcSim` over `NpcState` — schedule
-   state machine (idle/wander/goto/sleep + intent home/work/wander) on
-   a tick-count clock (100 ticks/hour, day = 2400 ticks ≈ 40 s, starts
-   08:00): night (22–06) or exhaustion → path home → sleep until dawn +
-   rested; work hours → ~60% commute; else hash-scattered wander.
-   Needs are deterministic (sleep +100/day awake, −4× asleep, gates
-   bedtime; hunger rises with no consumer — no food exists). Movement
-   is grid-following (2.2 cells/s, vertical easing); the one physical
-   rule: support vanished under a figure → gravity fall → landing
-   re-path; landing in water despawns ("swept away"). Population
-   maintenance: ≤ 1 spawn/tick (ring 14–60), despawn past 80, cap 16.
-   **NPCs are transient — not in the save format**; reloads
-   repopulate deterministically.
-3. **Determinism**: no sequential RNG — every choice is
-   `hash3(id, salt, timeTicks, seed)`. Identical tick sequences are
-   bit-identical (unit-tested).
-4. **Local invalidation**: the sim chains onto `World.onVoxelChanged`
-   (read-only; NPCs never write voxels) and re-paths only paths the
-   edit severed, budgeted `DECIDES_PER_TICK = 3` A\* searches per fixed
-   step, each ≤ 512 expansions (~5 ms worst).
-5. **Render + wiring**: `src/render/npcViz.ts` — one pooled
-   InstancedMesh of activity-tinted capsules (sleepers lie down;
-   unlit MeshBasicMaterial — the scene has no lights). main.ts: sim
-   ticks after structure in the fixed step, population centers on the
-   player, HUD `· npc N`, `npc`/`npcViz` on `__mw`, `npc.reset()` on
-   load.
-6. **Tests**: 31 new (309 total, 25 files) — navigation fixtures via
-   heightmap queries + a bespoke sealed fixture; schedule transitions
-   (night sleep at home → dawn wake, noon exhaustion bedtime),
-   wall-rise re-path, collapse fall, water sweep, population
-   fill/despawn, cross-sim determinism, 5000-tick fuzz with mid-run
-   edits.
-7. **Benchmarks** (`benchmarks/npc.bench.ts`): **GATE re-path ~1 ms**
-   (24 cells, real terrain); sealed-goal worst case ≈ 5 ms at the
-   512-expansion budget; **GATE 16-NPC population tick 0.03 ms mean**.
-   Baselines in `docs/performance.md`.
-8. **Docs**: architecture "NPCs (Phase 12)", performance NPC baselines,
-   known-issues "NPCs (Phase 12)" section, README, CHANGELOG `[0.10.0]`,
-   progress file (Session 008 + Phase 12 checklist + Documentation/QA
-   backlog updates).
+1. **`src/npc/perception.ts`** (pure): vision = `canSee` — range
+   (`SIGHT_DISTANCE` 24) × horizontal FOV (130°, movement-yaw
+   convention) × voxel line of sight (the Phase 5 DDA reused with a
+   solids-block-sight predicate; water never blocks; the ray stops
+   ~0.75 short of the target so a burning block doesn't occlude
+   itself). Hearing = per-event attenuation radii (explosion
+   `radius·4 + 20`, collapse `min(60, 20 + 2·√cells)`) — no propagation
+   field. `ThreatBoard` = capped (12), deduped per kind within 4 cells
+   (one blaze = one threat), tick-expiring memory of event sites.
+2. **`src/npc/npc.ts`**: `fear` (0–100) + `flee`/`investigate`
+   activities on `NpcState`. Fear ≥ `PANIC_THRESHOLD` (50) overrides
+   the schedule: **flee** paths away from the nearest remembered threat
+   (14–20 cells, hash-jitter, 1.6× speed, sleep interrupted, home
+   fallback, cower-and-retry); **investigate** paths to a stop-short
+   anchor ≤ 4 cells from a heard site and looks. Staggered perception
+   scans (every 10 ticks, offset by id): flood water at the feet →
+   flight (no bus event needed), sleepers wake for threats within 5,
+   and _seen_ threats add fear only within `ALARM_RADIUS` = 12 — so
+   investigators reach the site, get a good look, then spook (the plan
+   §42 chain, unit-tested as an arc). Fear decays ~0.1/tick.
+3. **Explosion damage**: `NpcSim.notify(event)` (wired to the bus's
+   `explosion`/`structureCollapsed`/`fireIgnited` in main.ts) applies
+   distance falloff inside `radius + 3`, lethal within the crater's
+   inner half, **quarter damage behind LOS-blocking walls**. Death
+   despawns and emits the new **`npcDied`** bus event (`explosion |
+drowned` — the water-sweep reports too). `notify` rejects non-finite
+   events: NaN is sticky through `Math.min`/`Math.max` and would
+   permanently poison fear (found by my own malformed harness event;
+   regression-tested).
+4. **Wiring/viz/HUD**: `npc.onEvent` flows back out to the bus;
+   fleeing figures render red, investigating teal; HUD `· panic N`;
+   `bus` exposed on `__mw`. NPCs remain transient — save format
+   untouched.
+5. **Tests**: `tests/npcReactions.test.ts` — 21 new (330 total):
+   LOS/FOV/threat-board primitives, epicenter kill + `npcDied`, wall
+   shield, flee-distance + calm-down, sleeper wakes (blast + blaze),
+   collapse panic vs. investigate (with the approach-then-spook arc),
+   fire seen/unseen, flood flight, NaN immunity, event-sequence
+   determinism, 3000-tick disaster fuzz.
+6. **Benchmarks** (`benchmarks/npc.bench.ts`): GATE population tick
+   with active threats **0.12 ms mean** (p75 0.02); explosion notify
+   ≈ 2 ms once per blast. Baselines in `docs/performance.md`.
+7. **Docs**: architecture "NPC reactions (Phase 13)", known-issues NPC
+   section rewritten for Phases 12–13, performance baselines, README,
+   CHANGELOG `[0.11.0]`, progress file (Session 009 + Phase 12
+   checklist Perception/Reactions ticked + Milestone 10 met + the town
+   checklist header realigned to plan numbering as Phase 14).
 
-## Harness lessons recorded this session
+## Harness lessons recorded this session (all three cost re-runs)
 
-- **Load drives the input-race mix.** Back-to-back harness runs + a
-  crashed process pushed the 15-min load average to ~5.9 and the
-  documented Phase 7/8/10 races (dropped keys/clicks at ~10 fps
-  software rendering) got much worse — including cascades that felled
-  the Phase 8 gate _via its own dropped delete-click_. After the load
-  settled, the world-state gates (conservation, cantilever, prefab,
-  save/reload where the input landed) passed again. Check `uptime`
-  before diagnosing; re-run before fixing.
-- **Continuous-state checks must read the sim's own rule.** The NPC
-  "standing" check re-derived geometry in the harness and flaked on
-  the vertical easing band (mid-climb reads solid; mid-drop reads
-  unsupported). Fixed by reading the sim's invariant (`falling` flag +
-  the sim's `ceil(y)-1` support rule). Same class as Session 007's
-  fixture-geometry lesson, one level deeper.
-- A bench that early-outs is worse than no bench: the first "sealed
-  goal" worst case wasn't walkable (unanchored in unloaded terrain) and
-  measured 0.9 µs of nothing. Probe what a bench measures before
-  recording it.
+- **Audit the harness helper before suspecting the sim.** The suite's
+  `npcState()` helper omitted `id` from its mapped output, so
+  "find by id" checks always read "gone" while the sim behaved
+  perfectly (a fresh-page probe proved it). When a check contradicts a
+  probe, the helper is the suspect.
+- **Malformed events are a real attack surface**: a destructuring
+  past-the-end (`y: undefined`) reached `notify` as NaN and disabled
+  every reaction permanently. The `notify` guard is the fix; if you add
+  more inbound events, keep the finite-check at the door.
+- **Harness state compounds within a section**: clock fast-forwards
+  decide who's asleep; each emitted event stacks fear on everyone in
+  earshot (repeated emits turn later subjects into panic-fleers); flee
+  paths outlive `fear = 0` pokes (activity keeps running); craters from
+  earlier blasts swallow later spawns. Order checks clean → dirty,
+  reset what a check doesn't mean to test (per-attempt fear reset, long
+  `waitTicks` to pin figures), and put state dumps in the `check`
+  detail line — one diagnostic run beats three theory runs.
+- **Load remains the dominant flake source**: across this session's
+  runs (load 2 → 10) the Phase 7/8/10/12 synthetic-input failure mix
+  swung 5 ↔ 17; the Phase 12 fall check joined the racy set (a walking
+  figure re-paths away instead of falling). Check `uptime`, re-run idle
+  before diagnosing.
 
 ## How to pick up (next session)
 
 1. `export PATH="$HOME/.local/bin:$PATH"`; `npm install`; `npm test`
-   → expect **309** green; `npm run dev`, open `?seed=24680` → up to 16
-   capsule figures wander the terrain (HUD `· npc 16`); wait for
-   ~22:00 on the game clock (or set `__mw.npc.timeTicks = 2200` in the
-   console) → they path home, sleep (lie down, dark blue), and wake at
-   dawn; dig under a figure → it falls and re-paths; build a wall in
-   front of a walker → it re-routes.
-2. **Phase 13 (NPC Reactions)** per the plan §111: perception (vision
-   distance/FOV/LOS — `raycast.ts` is reusable; hearing with simple
-   attenuation), fear, and event reactions. The bus already carries
-   `explosion`/`structureCollapsed`/`fireIgnited`; `NpcSim` already
-   demonstrates the re-path-on-world-change pattern; health is wired
-   with no damage source yet. See the Session 008 log's "Recommended
-   next steps" for the concrete breakdown.
-3. If NPC _feel_ needs work first: figures cannot jump, wade, or climb
-   more than one block per step, and there is no figure-figure
-   collision — all documented in known-issues "NPCs (Phase 12)".
+   → expect **330** green; `npm run dev`, open `?seed=24680` → wander
+   until you see figures, then explode one (`__mw` console:
+   `__mw.bus.emit({type:'explosion', x: p.x, y: 12, z: p.z, radius: 5,
+destroyed: 10})` with `p = __mw.player.position`) → nearby figures
+   flash red and run, HUD shows `· panic N`; light a wood structure
+   (ignite tool) → figures within sight flee; collapse a pillar →
+   distant figures walk over to look, then bolt. Wounded/killed
+   figures report through `bus.on('npcDied', ...)`.
+2. **Phase 14 (Procedural Town)** per the plan (§112): road graph on
+   the height function, block/lot subdivision, a parameterized house
+   generator first (NPC home/work anchors currently pick bare terrain
+   cells — pointing them at generated door cells makes the town
+   immediately alive), then shops/industrial, interiors, vegetation,
+   river integration. See the Session 009 log's "Recommended next
+   steps" for the concrete breakdown.
+3. If NPC _feel_ needs work first: fear is one scalar with no herding
+   or personality, hearing ignores walls, wounded figures don't
+   regenerate — all in known-issues "NPCs (Phases 12–13)".
 
 ## Agreed approach (unchanged)
 
@@ -113,14 +117,15 @@ is the short pickup map.**
   all three.js lives in `src/render/`; DOM adapters in `src/player/`,
   `src/persistence/`, `src/audio/`.
 - Terrain generation stays a pure function of (seed, coordinates);
-  `hash2` frozen; `hash3` is the extensible variant (and now also the
-  NPC randomness source).
+  `hash2` frozen; `hash3` is the extensible variant (and drives all NPC
+  randomness, now including reaction choices).
 - Material IDs are a serialization contract: don't renumber. Derived
   tables (`MATERIAL_HARDNESS`, `MATERIAL_FIRE`, `MATERIAL_STRENGTH`)
   stay out of the serialized schema.
 - Save formats version up through a migration chain (now at v2);
-  prefab format v1 validates structurally. NPC state is deliberately
-  not in the save (transient, deterministic respawn).
+  prefab format v1 validates structurally. NPC state (including fear
+  and threat memory) is deliberately not in the save (transient,
+  deterministic respawn).
 - Mesher changes must keep the greedy↔naive equivalence tests green
   (waterDrop is additive).
 - Every destructive/creative gesture is one grouped `applyEdits`
@@ -132,6 +137,10 @@ is the short pickup map.**
   (fluid → fire → structure → npc by construction order; the chain
   makes order harmless). The hook's signature is
   `(x, y, z, material, previous)`.
+- Inbound events for sims go through an explicit method
+  (`NpcSim.notify`) wired in main; outbound sim events use an
+  `onEvent` callback (`FireSim`, `NpcSim`) — the pure core stays
+  bus-agnostic.
 - Benchmarks and harness runs need an otherwise-idle machine (2-core
   VM): never run formatters/edits during a verification run, and check
   `uptime` if a run looks unusually flaky.

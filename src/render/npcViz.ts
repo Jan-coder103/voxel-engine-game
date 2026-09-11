@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 
 /**
- * NPC figures (Phase 12): one pooled InstancedMesh of capsules, one
+ * NPC figures (Phases 12–13): one pooled InstancedMesh of capsules, one
  * instance per simulated figure — same recycling discipline as the other
  * render pools (ADR-004). Activity tints the figure (green wandering,
- * yellow commuting, slate idle, dark blue asleep); sleepers lie down.
+ * yellow commuting, slate idle, dark blue asleep, red fleeing, teal
+ * investigating); sleepers lie down.
  */
 import type { NpcState } from '../npc/npc';
 
@@ -13,6 +14,8 @@ const ACTIVITY_COLORS: Record<NpcState['activity'], number> = {
   wander: 0x5fae4a,
   goto: 0xffd75e,
   sleep: 0x44506e,
+  flee: 0xe0483a,
+  investigate: 0x3fb8a8,
 };
 
 /** Total figure height (capsule length + two hemispherical caps). */

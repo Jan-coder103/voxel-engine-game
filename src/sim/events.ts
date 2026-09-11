@@ -37,6 +37,14 @@ export type GameEvent =
       z: number;
       /** Why the fire died (steam puff on water, nothing on smothering). */
       cause: 'water' | 'smothered';
+    }
+  | {
+      type: 'npcDied';
+      x: number;
+      y: number;
+      z: number;
+      /** What killed the figure (swept away = landed in water). */
+      cause: 'explosion' | 'drowned';
     };
 
 export type GameEventType = GameEvent['type'];

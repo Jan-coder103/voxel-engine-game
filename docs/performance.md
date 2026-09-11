@@ -184,13 +184,27 @@ are 7×7 chunk columns around spawn.
 | GATE — full population tick (16 wandering NPCs)         | 0.03 ms mean (p99 0.4) |
 | sparse population tick (4 NPCs, mostly idle)            | 0.007 ms mean          |
 
+Phase 13 additions (same run):
+
+| Scene                                                      | ≈ time/op               |
+| ---------------------------------------------------------- | ----------------------- |
+| GATE — population tick with active threats (vision + flee) | 0.12 ms mean (p75 0.02) |
+| explosion `notify` (16 NPCs: damage + LOS checks)          | ≈ 2 ms once per blast   |
+
 Reading: the decide budget (3 × 512 expansions) bounds a collapse-burst
 tick at ≈ 15 ms worst case, but hopeless searches are rare by
 construction — an unreachable target ends in a long idle wait, not a
 retry storm — and the common re-path is ~1 ms. The population tick is
 noise-level; NPC costs are dominated by A\*, which the budget already
-caps. Note the VM caveat below: numbers are comparable between idle
-runs only.
+caps. With threats on the board the tick stays two orders under the
+frame: vision scans are staggered (one per figure per 10 ticks) and
+usually short-circuit on an empty board; the p99 is flee-decision A\*,
+same budget as any other decide. The ~2 ms explosion notify is a
+per-event one-off (16 LOS raycasts + damage), paid inside the frame
+that already carries the blast's own ~5–15 ms of edits/debris. The
+sealed-goal bench calls `findPath` at its default 2048-expansion budget
+(≈ 20 ms); the sim's decide budget of 512 caps at ≈ 5 ms. Note the VM
+caveat below: numbers are comparable between idle runs only.
 
 ## Runtime (dev session, Phase 5–8 demo)
 

@@ -86,9 +86,11 @@ milestone goes here before it goes to the backlog.
   edited to air (no debris, not counted as destroyed); surrounding
   sources then re-flood the crater. Since Phase 10 the blast also dumps
   heat on flammable crater-rim survivors, so explosions can start fires.
-- **No NPC reaction yet.** The explosion pipeline stops at edits +
-  debris + dust + sound (+ fire since Phase 10); NPC reactions are
-  Phase 12/13.
+- **NPCs take blast damage with caveats.** Since Phase 13 the explosion
+  event also hurts figures (distance falloff, lethal in the crater's
+  inner half, quarter damage behind walls) and scares them into
+  fleeing. There is no shrapnel/physics, no player damage from collapse
+  debris, and wounded figures do not regenerate (see the NPCs section).
 - **Collapse debris ignores the player.** Falling pieces don't push or
   damage the player; there is no physics body for the player-debris
   interaction (deliberately — believable first).
@@ -165,33 +167,51 @@ milestone goes here before it goes to the backlog.
   dev VM; see `docs/performance.md`) and run at most one per fixed step
   — a large multi-stage collapse spreads across ticks by design.
 
-## NPCs (Phase 12)
+## NPCs (Phases 12–13)
 
-- **No perception or reactions yet** (that is Phase 13): figures ignore
-  explosions, fires, and collapses except where physics forces them —
-  a collapse under their feet makes them fall, and world writes that
-  sever their path make them re-path. They do not flee, investigate,
-  or drown on purpose; only landing in water after a fall despawns
-  them ("swept away").
+- **Vision is a 130° horizontal cone with binary range** (24 cells) and
+  DDA occlusion: no peripheral gradients, no light level (figures see
+  at night), no motion detection. Sleepers "see" nothing — they wake
+  only for threats within 5 cells or blast panic.
+- **Hearing is a radius check, not propagation**: every figure inside
+  the event's hear radius perceives it fully; walls do not muffle
+  sound, and there is no delay (a blast at 40 cells is heard the same
+  tick it happens).
+- **Fear is a single scalar** with one threshold (`PANIC_THRESHOLD`
+  50): no per-threat memories, no personality beyond hash-gated
+  curiosity, no herd behavior (nearby panicked figures do not alarm
+  each other), and no exhaustion from fleeing.
+- **Explosion damage is a radius falloff with a quarter-through-wall
+  factor** — no shrapnel, no fall/impact damage, no debris hits.
+  Health does not regenerate; a wounded figure stays wounded until it
+  despawns (population is transient anyway).
+- **Flood response is proximity only**: water at/beside the feet scares
+  figures off, but they do not avoid a rising lake in their path
+  beyond the normal re-path (nav treats water as impassable), and
+  drowned figures are simply despawned ("swept away") — no corpse, no
+  `npcDied` viz beyond the bus event.
+- **Investigation is a single stop-short anchor**: figures path to
+  within ~4 cells of a heard site, look for a moment, then resume.
+  They do not coordinate, report, or remember the site after the
+  threat memory expires (≤ 600 ticks).
 - **Grid-following movement, not physics**: figures glide between cell
   centers at a fixed speed with vertical easing. They cannot jump,
   climb more than one block per step, or path drops deeper than
   `MAX_DROP` (3). During the easing band a figure visually overlaps
-  the block it is climbing — cosmetic, not a support violation.
+  the block it is climbing — cosmetic, not a support violation. Fleeing
+  figures run 1.6× speed but still cannot jump gaps.
 - **The schedule clock is not the world clock**: a tick counter (40 s
   per game day) drives bed/work hours; there is no sun, no lighting
   change, no weather coupling. Phase 15/16 (atmosphere) should replace
   the counter's role with the real day/night cycle.
 - **Needs are half-wired**: sleep gates behavior (bedtime + exhaustion
   both work); hunger rises and is read in tests/debug only — there is
-  no food to eat and no consequence yet. Health exists (100) with no
-  damage source; explosions do not hurt figures until Phase 13 wires
-  reactions.
+  no food to eat and no consequence yet.
 - **Population is transient**: NPCs are not in the save format
   (deliberate — they respawn deterministically around the player, and
   a reload repopulates identically). Home/work anchors are picked at
   spawn from nearby walkable cells, not from town data — there are no
-  buildings to assign yet (Phase 13/14).
+  buildings to assign yet (Phase 14).
 - **No figure-figure collision**: NPCs can overlap each other (and the
   player). Believable at population 16; revisit with the 200-NPC
   benchmark (Phase 25+).
@@ -200,7 +220,8 @@ milestone goes here before it goes to the backlog.
 - **Sealed-in figures idle**: an unreachable home (walled in) ends the
   decision in a long idle wait and retry, not path-finding around the
   obstacle; the A\* budget (512 expansions) caps the wasted work at
-  ~5 ms per attempt.
+  ~5 ms per attempt. A panicking figure with no valid flee target falls
+  back to its home anchor, then cowers in place.
 
 ## GUI verification (headless)
 

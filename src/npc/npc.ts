@@ -1,7 +1,16 @@
 import type { World } from '../voxel/world';
-import { AIR, WATER, isSolidForCollision } from '../voxel/materials';
+import { AIR, WATER, isSolidForCollision, type VoxelMaterialID } from '../voxel/materials';
 import { hash3 } from '../voxel/terrain';
 import { WORLD_HEIGHT } from '../voxel/coordinates';
+import type { GameEvent } from '../sim/events';
+import {
+  canSee,
+  hasLineOfSight,
+  ThreatBoard,
+  type Point3,
+  type ThreatKind,
+  type ThreatPoint,
+} from './perception';
 import {
   findPath,
   nearestWalkable,
@@ -12,17 +21,26 @@ import {
 } from './navigation';
 
 /**
- * NPC simulation (Phase 12): a small population of wandering figures
+ * NPC simulation (Phases 12–13): a small population of wandering figures
  * that live on the nav grid — schedule-driven days (work, leisure,
  * sleep at home), needs that accumulate deterministically, and paths
  * that survive a mutable world (edits and collapses invalidate only the
- * paths they touch — local invalidation, plan §40).
+ * paths they touch — local invalidation, plan §40). Phase 13 adds
+ * perception and reactions (plan §111): events on the bus (explosions,
+ * collapses, ignitions) are heard within an attenuation radius, recent
+ * threat sites are *seen* with distance + FOV + voxel line-of-sight, and
+ * fear drives the two reaction states — `flee` (panic: run from the
+ * nearest remembered threat, faster than normal, sleep interrupted) and
+ * `investigate` (walk toward a heard noise, look, resume). Water at the
+ * feet is its own message: floods drive figures out with no bus event.
  *
  * Believability over accuracy, deliberately:
  * - Movement is grid-following (cell centers), not physics. The one
  *   physical rule: when the ground under a figure vanishes (collapse),
  *   it falls with gravity until it lands — and is despawned if it lands
  *   in water ("swept away").
+ * - Explosion damage is a distance falloff quartered when a wall blocks
+ *   line of sight; death emits `npcDied` for audio/scripts (Phase 17+).
  * - Needs (hunger, sleep) accumulate and sleep gates behavior; hunger
  *   has no consumer yet (no food exists to eat) and only reads out in
  *   tests/debug until an economy lands.
@@ -42,10 +60,12 @@ export interface NpcState {
   readonly id: number;
   position: { x: number; y: number; z: number };
   yaw: number;
-  activity: 'idle' | 'wander' | 'goto' | 'sleep';
+  activity: 'idle' | 'wander' | 'goto' | 'sleep' | 'flee' | 'investigate';
   /** What the current `goto` is for (drives arrival behavior + viz). */
-  intent: 'home' | 'work' | 'wander';
+  intent: 'home' | 'work' | 'wander' | 'flee' | 'investigate';
   health: number;
+  /** 0–100; ≥ PANIC_THRESHOLD overrides the schedule with flight. */
+  fear: number;
   needs: { hunger: number; sleep: number };
   home: NavCell;
   work: NavCell;
@@ -72,6 +92,15 @@ export const DESPAWN_RADIUS = 80;
 /** Path decisions (A* searches) per tick — collapse bursts spread out. */
 export const DECIDES_PER_TICK = 3;
 
+/** Fear at (and above) which a figure flees instead of living its life. */
+export const PANIC_THRESHOLD = 50;
+/** Base distance of a panic run (cells), plus a per-figure scatter. */
+export const FLEE_DISTANCE = 14;
+/** Speed multiplier while fleeing (panic is faster than a stroll). */
+export const FLEE_SPEED_MULT = 1.6;
+/** Ticks between a figure's perception scans, staggered by id. */
+export const SCAN_PERIOD = 10;
+
 /** Schedule clock: 100 ticks per game hour, 2400 per day (40 s real time). */
 export const TICKS_PER_HOUR = 100;
 export const DAY_TICKS = TICKS_PER_HOUR * 24;
@@ -85,6 +114,36 @@ const SLEEPY_THRESHOLD = 80;
 const RESTED_THRESHOLD = 20;
 
 const WANDER_RADIUS = 10;
+
+/** Fear gained per perception scan when a threat of this kind is seen. */
+const FEAR_ON_SIGHT: Record<ThreatKind, number> = {
+  explosion: 45,
+  collapse: 30,
+  fire: 25,
+  water: 60,
+};
+/** Fear decay per tick — panic subsides in seconds of real time. */
+const FEAR_DECAY_AWAKE = 0.1;
+const FEAR_DECAY_ASLEEP = 0.15;
+/** Sleepers don't look, but noise/heat this close wakes anyone (cells). */
+const SLEEPER_WAKE_RADIUS = 5;
+/**
+ * Seen threats only build fear within this range (cells) — a distant
+ * blaze or rubble pile is scenery until you are near it; the *event*
+ * already delivered its fear when heard. Keeps investigators walking
+ * toward a rumble instead of panicking at first glance.
+ */
+const ALARM_RADIUS = 12;
+/** Horizontal neighbor order for the water-proximity check. */
+const SENSE_NEIGHBORS: readonly (readonly [number, number])[] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
+/** Outbound event: a figure died (audio/scripts subscribe, Phase 17+). */
+export type NpcEvent = Extract<GameEvent, { type: 'npcDied' }>;
 
 export function isNightHour(hour: number): boolean {
   return hour >= SLEEP_START_HOUR || hour < SLEEP_END_HOUR;
@@ -107,6 +166,11 @@ export class NpcSim {
   private readonly npcs: NpcState[] = [];
   private readonly query: NavQuery;
   private readonly population: number;
+  /** Short memory of recent explosion/collapse/fire/water sites. */
+  private readonly threats = new ThreatBoard();
+
+  /** Wired by main to the game event bus (pure core stays bus-agnostic). */
+  onEvent?: (event: NpcEvent) => void;
 
   constructor(
     private readonly world: World,
@@ -134,21 +198,59 @@ export class NpcSim {
     return this.npcs.length;
   }
 
+  /** Figures currently panicking (HUD flavor line). */
+  get fleeingCount(): number {
+    let n = 0;
+    for (const npc of this.npcs) if (npc.activity === 'flee') n++;
+    return n;
+  }
+
   /** Current game hour as a float (e.g. 13.5 = 13:30). */
   hourOfDay(): number {
     return (this.timeTicks % DAY_TICKS) / TICKS_PER_HOUR;
   }
 
-  /** Forget all figures and the clock (world reset/load). */
+  /**
+   * Reactions enter here: main wires the bus's `explosion`,
+   * `structureCollapsed`, and `fireIgnited` events to this. Called
+   * between ticks (never re-entrant with `tick`), it damages, frightens,
+   * and re-tasking figures synchronously — the next fixed step walks
+   * them out of trouble within the normal decide budget.
+   */
+  notify(event: GameEvent): void {
+    // A malformed event (NaN/∞ position from a script or a wiring bug)
+    // must not poison figure state — NaN survives Math.min/Math.max and
+    // would permanently break every reaction downstream.
+    if (!Number.isFinite(event.x + event.y + event.z)) return;
+    switch (event.type) {
+      case 'explosion':
+        if (!Number.isFinite(event.radius)) return;
+        this.onExplosion(event);
+        break;
+      case 'structureCollapsed':
+        if (!Number.isFinite(event.cells)) return;
+        this.onCollapsed(event);
+        break;
+      case 'fireIgnited':
+        this.onFire(event);
+        break;
+      default:
+        break; // extinguishing is good news; npcDied is our own output
+    }
+  }
+
+  /** Forget all figures, the clock, and every threat memory (reset/load). */
   reset(): void {
     this.npcs.length = 0;
+    this.threats.clear();
     this.timeTicks = 8 * TICKS_PER_HOUR;
     this.tickCount = 0;
   }
 
   /**
-   * One fixed step: advance the clock and needs, run behaviors, move
-   * figures, then maintain the population around `center` (the player).
+   * One fixed step: advance the clock and needs, perceive on a staggered
+   * cadence, run behaviors, move figures, then maintain the population
+   * around `center` (the player).
    */
   tick(center: { x: number; z: number }): void {
     this.timeTicks++;
@@ -158,8 +260,13 @@ export class NpcSim {
 
     for (let i = this.npcs.length - 1; i >= 0; i--) {
       const npc = this.npcs[i];
+      npc.fear = Math.max(
+        0,
+        npc.fear - (npc.activity === 'sleep' ? FEAR_DECAY_ASLEEP : FEAR_DECAY_AWAKE),
+      );
       this.stepNeeds(npc, hour);
       if (this.stepFall(npc, i)) continue; // mid-fall: physics only
+      if ((this.tickCount + npc.id * 3) % SCAN_PERIOD === 0) this.sense(npc);
       if (this.stepBehavior(npc, hour, decideBudget)) decideBudget--;
       this.stepMove(npc);
     }
@@ -244,7 +351,7 @@ export class NpcSim {
         this.world.getVoxel(Math.floor(npc.position.x), block + 1, Math.floor(npc.position.z)) ===
         WATER
       ) {
-        this.npcs.splice(index, 1); // landed in a lake: swept away
+        this.despawn(index, 'drowned'); // landed in a lake: swept away
       } else {
         npc.repath = true;
         npc.path.length = 0;
@@ -252,6 +359,245 @@ export class NpcSim {
       }
     }
     return true;
+  }
+
+  // --- perception + reactions (Phase 13) -------------------------------------
+
+  private materialAt(x: number, y: number, z: number): VoxelMaterialID {
+    return this.world.getVoxel(x, y, z);
+  }
+
+  /** An explosion hurts, deafens, and scatters. */
+  private onExplosion(event: Extract<GameEvent, { type: 'explosion' }>): void {
+    this.threats.add({
+      x: event.x,
+      y: event.y,
+      z: event.z,
+      kind: 'explosion',
+      expiresAtTick: this.tickCount + 400,
+    });
+    const hearRadius = event.radius * 4 + 20;
+    const panicRadius = event.radius + 6;
+    const hurtRadius = event.radius + 3;
+    for (let i = this.npcs.length - 1; i >= 0; i--) {
+      const npc = this.npcs[i];
+      const dist = Math.hypot(
+        npc.position.x - event.x,
+        npc.position.y + 1.4 - event.y,
+        npc.position.z - event.z,
+      );
+      if (dist <= hurtRadius) {
+        // Distance falloff; the crater itself is lethal. A wall between
+        // blast and figure takes the blast (LOS blocked → quarter damage).
+        let dmg = dist <= hurtRadius / 2 ? 100 : 100 * (1 - dist / hurtRadius);
+        if (
+          !hasLineOfSight(
+            (x, y, z) => this.materialAt(x, y, z),
+            { x: event.x, y: event.y, z: event.z },
+            { x: npc.position.x, y: npc.position.y + 1.4, z: npc.position.z },
+          )
+        ) {
+          dmg *= 0.25;
+        }
+        npc.health = Math.max(0, npc.health - dmg);
+        if (npc.health <= 0) {
+          this.despawn(i, 'explosion');
+          continue;
+        }
+      }
+      if (dist > hearRadius) continue;
+      const proximity = 1 - dist / hearRadius;
+      npc.fear = Math.min(100, npc.fear + (dist <= panicRadius ? 100 : 60 + 40 * proximity));
+      if (dist <= panicRadius) this.startFlee(npc);
+      else this.startInvestigate(npc, event.x, event.y, event.z);
+    }
+  }
+
+  /** A collapse is loud and frightening: flee up close, gawk from afar. */
+  private onCollapsed(event: Extract<GameEvent, { type: 'structureCollapsed' }>): void {
+    this.threats.add({
+      x: event.x,
+      y: event.y,
+      z: event.z,
+      kind: 'collapse',
+      expiresAtTick: this.tickCount + 400,
+    });
+    const hearRadius = Math.min(60, 20 + 2 * Math.sqrt(event.cells));
+    for (const npc of this.npcs) {
+      const dist = Math.hypot(
+        npc.position.x - event.x,
+        npc.position.y - event.y,
+        npc.position.z - event.z,
+      );
+      if (dist > hearRadius) continue;
+      const gain = 30 + Math.min(40, event.cells / 4);
+      npc.fear = Math.min(100, npc.fear + gain * (dist <= 10 ? 1.6 : 0.6));
+      if (npc.fear >= PANIC_THRESHOLD) this.startFlee(npc);
+      else this.startInvestigate(npc, event.x, event.y, event.z);
+    }
+  }
+
+  /** A new burning cell: remembered for vision scans; close figures react. */
+  private onFire(event: Extract<GameEvent, { type: 'fireIgnited' }>): void {
+    this.threats.add({
+      x: event.x + 0.5,
+      y: event.y + 0.5,
+      z: event.z + 0.5,
+      kind: 'fire',
+      expiresAtTick: this.tickCount + 600,
+    });
+    for (const npc of this.npcs) {
+      const d = Math.hypot(npc.position.x - (event.x + 0.5), npc.position.z - (event.z + 0.5));
+      if (d > SLEEPER_WAKE_RADIUS) continue;
+      // Sleepers startle awake (a blaze two cells over is not a lullaby);
+      // awake figures need a look or a second ignition to panic.
+      npc.fear = Math.min(100, npc.fear + (npc.activity === 'sleep' ? 60 : 30));
+      if (npc.fear >= PANIC_THRESHOLD) this.startFlee(npc);
+    }
+  }
+
+  /**
+   * Staggered per-figure perception (every SCAN_PERIOD ticks, offset by
+   * id so the population's scans spread across ticks): floods are felt
+   * at the feet, sleepers wake for close threats, everyone else *looks*
+   * at remembered threat sites. Fear gains here keep a figure fleeing
+   * while the threat stays visible — and let it calm down once away.
+   */
+  private sense(npc: NpcState): void {
+    this.threats.prune(this.tickCount);
+    const bx = Math.floor(npc.position.x);
+    const by = Math.floor(npc.position.y);
+    const bz = Math.floor(npc.position.z);
+    let waterAt: Point3 | undefined;
+    if (this.world.getVoxel(bx, by, bz) === WATER) {
+      waterAt = { x: bx + 0.5, y: by + 0.5, z: bz + 0.5 };
+    } else {
+      for (const [dx, dz] of SENSE_NEIGHBORS) {
+        if (this.world.getVoxel(bx + dx, by, bz + dz) === WATER) {
+          waterAt = { x: bx + dx + 0.5, y: by + 0.5, z: bz + dz + 0.5 };
+          break;
+        }
+      }
+    }
+    if (waterAt) {
+      this.threats.add({ ...waterAt, kind: 'water', expiresAtTick: this.tickCount + 150 });
+      npc.fear = Math.min(100, npc.fear + FEAR_ON_SIGHT.water);
+      this.startFlee(npc);
+      return;
+    }
+    const eye: Point3 = { x: npc.position.x, y: npc.position.y + 1.4, z: npc.position.z };
+    for (const threat of this.threats.list) {
+      const d = Math.hypot(
+        npc.position.x - threat.x,
+        npc.position.y - threat.y,
+        npc.position.z - threat.z,
+      );
+      if (npc.activity === 'sleep') {
+        if (d <= SLEEPER_WAKE_RADIUS) {
+          npc.fear = Math.min(100, npc.fear + 50);
+          this.startFlee(npc);
+          return;
+        }
+        continue;
+      }
+      if (d > ALARM_RADIUS) continue; // visible but too far to scare
+      if (!canSee((x, y, z) => this.materialAt(x, y, z), eye, npc.yaw, threat)) continue;
+      npc.fear = Math.min(100, npc.fear + FEAR_ON_SIGHT[threat.kind]);
+      if (npc.fear >= PANIC_THRESHOLD) this.startFlee(npc);
+    }
+  }
+
+  /** Panic: drop everything and run (sleep included). Idempotent mid-run. */
+  private startFlee(npc: NpcState): void {
+    if (npc.activity === 'flee') return; // already running — keep the path
+    npc.activity = 'flee';
+    npc.intent = 'flee';
+    npc.waitTicks = 0;
+    npc.path.length = 0;
+    npc.pathIndex = 0;
+    npc.repath = true;
+  }
+
+  /**
+   * Curiosity: walk toward a heard noise and look. Skipped while
+   * sleeping (only panic wakes), already fleeing, or already on the way.
+   */
+  private startInvestigate(npc: NpcState, x: number, y: number, z: number): void {
+    if (npc.activity === 'sleep' || npc.activity === 'flee' || npc.activity === 'investigate') {
+      return;
+    }
+    // Stop a few cells short of the site: look, don't leap in.
+    const target = nearestWalkable(this.query, Math.round(x), Math.round(y), Math.round(z), 4);
+    if (!target) return;
+    const start = nearestWalkable(
+      this.query,
+      Math.floor(npc.position.x),
+      Math.round(npc.position.y),
+      Math.floor(npc.position.z),
+      2,
+    );
+    if (!start) return;
+    const result = findPath(this.query, start, target, { maxExpansions: 256 });
+    if (!result || result.cells.length === 0) return;
+    npc.intent = 'investigate';
+    npc.waitTicks = 0;
+    npc.path = result.cells;
+    npc.pathIndex = 0;
+    npc.repath = false;
+    npc.activity = 'investigate';
+  }
+
+  /** Run from the nearest remembered threat — away, with per-figure jitter. */
+  private decideFlee(npc: NpcState): void {
+    let threat: ThreatPoint | undefined;
+    let best = Number.POSITIVE_INFINITY;
+    for (const t of this.threats.list) {
+      const d = (npc.position.x - t.x) ** 2 + (npc.position.z - t.z) ** 2;
+      if (d < best) {
+        best = d;
+        threat = t;
+      }
+    }
+    const away = threat
+      ? Math.atan2(npc.position.z - threat.z, npc.position.x - threat.x)
+      : this.rand(npc.id, 33) * Math.PI * 2;
+    // Deterministic jitter (±~63°) so crowds don't funnel through one gap.
+    const angle = away + (this.rand(npc.id, 34) - 0.5) * 1.1;
+    const dist = FLEE_DISTANCE + this.rand(npc.id, 35) * 6;
+    const target =
+      nearestWalkable(
+        this.query,
+        Math.round(npc.position.x + Math.cos(angle) * dist),
+        Math.round(npc.position.y),
+        Math.round(npc.position.z + Math.sin(angle) * dist),
+        5,
+      ) ?? npc.home; // hemmed in: run for home instead
+    const start = nearestWalkable(
+      this.query,
+      Math.floor(npc.position.x),
+      Math.round(npc.position.y),
+      Math.floor(npc.position.z),
+      2,
+    );
+    if (!start) {
+      npc.waitTicks = 30;
+      return;
+    }
+    const result = findPath(this.query, start, target, { maxExpansions: 512 });
+    if (!result) {
+      // Nowhere to run: cower briefly; the next decide tries afresh.
+      npc.waitTicks = 30 + Math.floor(this.rand(npc.id, 36) * 60);
+      return;
+    }
+    npc.waitTicks = 0;
+    npc.repath = false;
+    if (result.cells.length === 0) {
+      this.arrive(npc); // nowhere farther to go — catch breath, re-decide
+      return;
+    }
+    npc.path = result.cells;
+    npc.pathIndex = 0;
+    npc.activity = 'flee';
   }
 
   // --- behavior ------------------------------------------------------------------
@@ -272,6 +618,11 @@ export class NpcSim {
 
   /** Choose a destination from the schedule and path toward it (or idle). */
   private decide(npc: NpcState, hour: number): void {
+    // Panic overrides the schedule while there is something to flee.
+    if (npc.fear >= PANIC_THRESHOLD && this.threats.size > 0) {
+      this.decideFlee(npc);
+      return;
+    }
     const bedtime = isNightHour(hour) || npc.needs.sleep > SLEEPY_THRESHOLD;
     const worktime = !bedtime && isWorkHour(hour) && this.rand(npc.id, 21) < 0.6;
 
@@ -334,6 +685,19 @@ export class NpcSim {
 
   private arrive(npc: NpcState): void {
     const hour = this.hourOfDay();
+    if (npc.intent === 'flee') {
+      // Reached a safe spot: catch breath; the next decide re-runs flight
+      // if the fear hasn't subsided (or resumes normal life if it has).
+      npc.activity = 'idle';
+      npc.waitTicks = 20 + Math.floor(this.rand(npc.id, 44) * 40);
+      return;
+    }
+    if (npc.intent === 'investigate') {
+      // At the site: stand and look; vision scans do the seeing.
+      npc.activity = 'idle';
+      npc.waitTicks = 100 + Math.floor(this.rand(npc.id, 45) * 120);
+      return;
+    }
     if (npc.intent === 'home' && (isNightHour(hour) || npc.needs.sleep > SLEEPY_THRESHOLD)) {
       npc.activity = 'sleep';
       return;
@@ -361,7 +725,8 @@ export class NpcSim {
     const dx = tx - npc.position.x;
     const dz = tz - npc.position.z;
     const dist = Math.hypot(dx, dz);
-    const step = NPC_SPEED / 60;
+    const speed = npc.activity === 'flee' ? NPC_SPEED * FLEE_SPEED_MULT : NPC_SPEED;
+    const step = speed / 60;
     if (dist <= step) {
       npc.position.x = tx;
       npc.position.z = tz;
@@ -448,6 +813,7 @@ export class NpcSim {
       activity: 'idle',
       intent: 'wander',
       health: 100,
+      fear: 0,
       needs: { hunger: this.rand(id, 51) * 20, sleep: this.rand(id, 52) * 30 },
       home: anchor(61, 3, 7),
       work: anchor(71, 8, 16),
@@ -460,6 +826,19 @@ export class NpcSim {
     };
     this.npcs.push(npc);
     return npc;
+  }
+
+  /** Remove a figure for good (the only deaths: blasts and deep water). */
+  private despawn(index: number, cause: 'explosion' | 'drowned'): void {
+    const npc = this.npcs[index];
+    this.npcs.splice(index, 1);
+    this.onEvent?.({
+      type: 'npcDied',
+      x: npc.position.x,
+      y: npc.position.y,
+      z: npc.position.z,
+      cause,
+    });
   }
 
   // --- invalidation -----------------------------------------------------------------------

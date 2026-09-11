@@ -31,23 +31,96 @@
 
 ## Overall Phase
 
-**Current phase:** Phase 12 (NPCs) — **complete and committed** (implementation, verification, docs). Perception + event reactions remain for Phase 13.
+**Current phase:** Phase 13 (NPC Reactions) — **complete and committed** (implementation, verification, docs). Milestone 10 met: NPCs live in **and react to** the world. Next: Phase 14 (Procedural Town) per the plan (§112).
 
-**Current milestone:** Milestones 1–9 met. Phase 12 delivers "NPCs live in the world": deterministic wandering population, schedule (work/leisure/sleep-at-home), needs, A\* navigation with edit-driven local invalidation, collapse falls. Milestone 10 ("…and react to the world") is half met — physics-level reactions (falls, re-paths) only; fear/flee/investigate is Phase 13.
+**Current milestone:** Milestones 1–10 met. Phase 13 delivers perception (vision = range × FOV × voxel LOS; hearing = per-event attenuation radii), a threat memory, fear, and the reaction states — flee (panic runs, sleep interrupted, walls shield blast damage), investigate (walk toward a heard noise, look, spook), flood flight, explosion damage with `npcDied` events. The plan §42 chain (investigate → see destruction → fear → flee) emerges from the tuning.
 
-**Overall completion:** ~55% (Phases 0–12 done; deferred: NPC perception/reactions (Phase 13), NPC inventory (no item system exists), hunger consequences (no food exists), NPC wading/swimming, real day/night clock (Phase 15/16), plus the Phase 11 deferrals: lateral load distribution, rigid-body engine, wind/rain coupling, fire persistence in saves, volumetric smoke, sustained fire audio)
+**Overall completion:** ~58% (Phases 0–13 done; deferred: NPC inventory (no item system), hunger consequences (no food), NPC wading/swimming, real day/night clock (Phase 15/16), fire persistence in saves, volumetric smoke, Phase 11 deferrals (lateral load, rigid bodies, wind/rain coupling), fear herding/personality)
 
-**Last completed task:** Session 008 (2026-09-11) — implemented Phase 12: pure `NpcSim` (`src/npc/npc.ts`) + navigation (`src/npc/navigation.ts`): walkable-cell queries (open headroom ×2 + solid floor, water excluded), A\* over the implicit grid graph (Manhattan heuristic, insertion-order tie-breaks, flat/+1/drop ≤ 3 moves with lip-clearance rule, 512-expansion decide budget), local invalidation by observing `World.onVoxelChanged` (re-path only paths severed by an edit, ≤ 3 decides/fixed step), schedule state machine on a tick-count clock (100 ticks/hour: night + exhaustion → sleep at home until dawn/rested, work hours → mostly commute, else wander), deterministic needs (sleep gates behavior, hunger rises unconsumed), hash-based randomness (no sequential RNG), population maintenance around the player (spawn ≤ 1/tick ring-scattered, despawn past 80, transient — not in saves), collapse fall with gravity (water landing = despawn); `NpcViz` pooled instanced figures (activity-tinted, sleepers lie down) + HUD `· npc N` + `__mw` exposure; 31 tests (309 total); benchmark gates ~1 ms re-path / 0.03 ms population tick; headless browser Phase 12 section 10/10 green.
+**Last completed task:** Session 009 (2026-09-11) — implemented Phase 13: pure perception module (`src/npc/perception.ts`: `canSee` = 24-cell range × 130° FOV × DDA line of sight reusing the Phase 5 raycast with a solids-block-sight predicate; per-event hear radii; capped/deduplicated/expiring `ThreatBoard`); fear + `flee`/`investigate` activities on `NpcSim` (panic overrides the schedule at ≥ 50, flee runs 1.6× with deterministic jitter and wakes sleepers, investigate stops short of a heard site and looks; staggered perception scans every 10 ticks see threat sites — but only alarm within 12 cells — and feel flood water at the feet); explosion damage (distance falloff, lethal in the crater's inner half, quarter behind LOS-blocking walls) with a new `npcDied` bus event (`explosion | drowned`); NaN-event guard at `notify`'s door (harness-found robustness hole); bus wiring (`npc.notify` in, `npc.onEvent` out), red/teal viz tints, `· panic N` HUD line, `bus` on `__mw`; 21 tests (330 total); threat-tick benchmark 0.12 ms mean; headless Phase 13 section 9/9 green in two consecutive runs, zero page errors.
 
 **Current task:** None — session complete, work committed.
 
 **Blocked by:** Nothing.
 
-**Next recommended action:** **Phase 13 (NPC Reactions)** per the plan (§111): perception (vision distance/FOV/line-of-sight, hearing with simple propagation), fear, and the event-driven reactions — the bus already carries `explosion`/`structureCollapsed`/`fireIgnited`, and `NpcSim` already demonstrates the re-path-on-world-change pattern. Natural follow-ups: damage to NPCs from explosions (health is wired, no source yet), flee-to-home behavior, investigate-sound state.
+**Next recommended action:** **Phase 14 (Procedural Town)** per the plan (§112): roads, blocks/lots, building generators (houses first — the NPC home/work anchors currently pick bare terrain cells), interiors, vegetation, river integration. The NPC population, schedules, and reactions are the consumers that make a town immediately alive; utilities (Phase 15) can couple into the existing fire/fluid/structural sims afterwards.
 
 ---
 
 # Session Log
+
+## Session 009 — 2026-09-11
+
+**Status:** Complete — Phase 13 (NPC Reactions) done, verified, documented, committed. Milestone 10 met.
+
+### Completed
+
+- [x] Perception core (`src/npc/perception.ts`, pure): `hasLineOfSight` (Phase 5 DDA reused, solids block sight, water doesn't, ray stops ~0.75 short of the target so a burning block doesn't occlude itself), `withinFov` (130° horizontal, movement-yaw convention), `canSee` (range 24 × FOV × LOS), and `ThreatBoard` — capped (12), deduplicated per kind within 4 cells (one blaze = one threat), tick-expiring memory of event sites (blast/collapse 400, fire 600, water 150).
+- [x] Hearing: no propagation field — per-kind attenuation radii (explosion `radius·4 + 20`, collapse `min(60, 20 + 2·√cells)`); a figure hears iff inside.
+- [x] Reactions on `NpcSim` (`src/npc/npc.ts`): `fear` (0–100) on `NpcState`; new activities `flee`/`investigate` (+ matching intents). `PANIC_THRESHOLD` 50 overrides the schedule: `decideFlee` paths away from the nearest remembered threat (14–20 cells, hash-jitter ±~31°, 1.6× speed via `FLEE_SPEED_MULT`, home fallback when hemmed in, cower-and-retry when cornered, sleepers wake); `startInvestigate` paths to a stop-short anchor ≤ 4 cells from a heard site, then stands and looks (100–220 ticks). Arrivals in both states are brief idle waits; fear decays ~0.1/tick (0.15 asleep) so figures calm down and resume their lives.
+- [x] Perception scans: staggered every `SCAN_PERIOD` = 10 ticks (offset by id·3): flood check (water at the feet or 4 neighbors → +60 fear → flee; no bus event needed), sleeper wake (any threat within 5 cells → +50), and vision — seen threats add fear **only within `ALARM_RADIUS` = 12 cells**, which lets investigators reach the site and produces the plan §42 chain: investigate → see destruction → fear spike → flee (unit-tested as an arc).
+- [x] Explosion damage: `notify` (wired to bus `explosion`/`structureCollapsed`/`fireIgnited`) applies distance falloff inside `radius + 3`, lethal within the inner half (the crater), **quarter damage when LOS is blocked**; health ≤ 0 → despawn + `npcDied` bus event (new union member, `cause: 'explosion' | 'drowned'` — the Phase 12 water-sweep now reports too). `NpcSim.onEvent` (outbound, FireSim pattern) wired in main.
+- [x] Robustness: `notify` rejects non-finite event positions/radius/cells — NaN survives `Math.min`/`Math.max` and would permanently poison every figure's fear (found by my own malformed harness event; regression-tested).
+- [x] Game wiring (`src/main.ts`): `bus.on(... → npc.notify)`, `npc.onEvent → bus.emit`, `· panic N` HUD line (`npc.fleeingCount`), `bus` exposed on the `__mw` debug hook. Viz (`src/render/npcViz.ts`): flee red `0xe0483a`, investigate teal `0x3fb8a8`.
+- [x] Tests: `tests/npcReactions.test.ts` — 21 new (**330 total**, 26 files): LOS (walls block, water doesn't, one row over is open), FOV (in front/behind/off-axis), threat board (dedupe, inclusive expiry, cap-drops-oldest), epicenter kill + `npcDied`, falloff damage + wall-shield quartering, flee-distance-gained + calm-down, sleeper wakes (blast + blaze), collapse panic vs. investigate (with the approach-then-spook arc), fire seen/unseen (FOV), flood flight (stays dry), malformed-event immunity, cross-sim determinism with events, 3000-tick disaster fuzz with invariants.
+- [x] Benchmarks (`benchmarks/npc.bench.ts`): **GATE population tick with active threats 0.12 ms mean** (p75 0.02 — vision scans staggered and short-circuiting on an empty board; p99 = flee-decide A\*); explosion notify ≈ 2 ms once per blast (16 LOS raycasts). Baselines in `docs/performance.md`.
+- [x] Headless browser verification (`.verify/run.mjs`): new Phase 13 section (9 checks) on the Phase 12 page — collapse investigation, epicenter kill through the real bus wiring (`npcDied` counted), survivor panic + `· panic` HUD + distance gained, wall-shield damage, sleeper wake, flood flight, isolated fear decay. **All 9 green in two consecutive runs, zero page errors.** The residual Phase 7/8/12 failures across runs are the documented synthetic-input races (their mix tracked machine load 2→10; world-state gates passed whenever their inputs landed).
+- [x] Docs: architecture "NPC reactions (Phase 13)" + refreshed intro, known-issues NPC section rewritten for Phases 12–13 (7 new explicit limitations) + explosion bullet updated, performance baselines + reading, README state + layout, CHANGELOG `[0.11.0]`, this file.
+
+### Fixed during verification
+
+- **Malformed events poisoned fear permanently (real sim bug, harness-found):** a probe blast with `y: undefined` (JS destructuring past the array end) reached `notify` as NaN coordinates; every figure's fear became NaN (sticky through `Math.min`/`Math.max`), silently disabling all reactions for the rest of the run. Fixed with a finite-check guard at `notify`'s door + unit test.
+- **The harness's own `npcState()` helper omitted `id`** — investigate subjects were searched by `id: undefined`, so every attempt read "gone" while the mechanic worked fine (proven by a fresh-page probe). One-line helper fix; lesson: when a check contradicts a probe, audit the helper first.
+- **Test-order state pollution**: the sleeper check's night fast-forward left most figures asleep at the (fake) morning; earlier blasts' flee paths outlived `fear = 0` pokes; repeated collapse events stacked +27 fear per emit onto the whole earshot, turning later subjects into panic-fleers. Restructured the section: investigation first (clean minds), per-attempt fear resets, floatee pinned with a long `waitTicks` (and spawned away from the kill-blast crater — a figure that wanders into flooded crater water is _correctly_ swept away), fear decay measured with the threat board cleared (runtime poke) and a known fear value.
+
+### Verification lessons (for future sessions)
+
+- When an in-page check contradicts a standalone probe, suspect the harness helper before the sim (this session: the missing-`id` bug cost several re-runs).
+- Harness state compounds across a section: clock fast-forwards decide who's asleep, event emissions decide who's panicking, and world edits (craters, walls) decide where spawns survive. Order checks clean → dirty, reset what a check doesn't mean to test, and put the payload (state dump) in the `check` detail line — one diagnostic run beats three theory runs.
+- Machine load (2 → 10 across this session's runs) remains the dominant flake source for the synthetic-input sections; the Phase 12 fall check joins the documented racy set (a walking figure re-paths away instead of falling). Re-run on an idle box before diagnosing sim bugs.
+
+### Deferred deliberately
+
+- Fear is a single scalar with one threshold: no personality beyond hash-gated curiosity, no herd alarm (panicked figures don't scare neighbors), no exhaustion, no per-threat memories — known-issues.
+- Hearing ignores walls and propagation delay; vision ignores light level (figures see at night) and peripherals.
+- Wounded NPCs don't regenerate (population is transient; health resets on respawn).
+- Investigation doesn't coordinate or remember past the threat expiry; no `npcDied` viz (the bus event is the hook for Phase 17 audio).
+- React-to-power-outage — no power system until Phase 15.
+
+### Tests
+
+- Unit tests: 330 passed (26 files; +21 NPC reactions)
+- Integration: headless browser suite incl. 9-check Phase 13 scenario (green twice consecutively); documented Phase 7/8/10/12 input-race flakes remain harness-side; manual GUI pass pending (user)
+- Typecheck: clean (strict) · Lint: clean · Prettier: clean · Build: succeeds (three.js chunk unchanged)
+
+### Benchmarks
+
+- NPC: GATE threat-tick 0.12 ms mean (p75 0.02); explosion notify ≈ 2 ms once; re-path gate unchanged (~0.9–1.1 ms); population tick unchanged (0.03 ms) — `docs/performance.md`
+- FPS: unchanged at idle (scans short-circuit on an empty threat board)
+
+### Architecture changes
+
+- New file: `src/npc/perception.ts` (pure — vision/LOS/FOV/hearing/`ThreatBoard`).
+- `GameEvent` union gains `npcDied` (`cause: 'explosion' | 'drowned'`).
+- `NpcState` gains `fear` and the `flee`/`investigate` activity/intent values (transient state — save format untouched, NPCs still transient).
+- `main.ts`: bus ↔ NPC wiring (notify in, onEvent out), `bus` on `__mw`; HUD panic line.
+
+### Known issues
+
+- `docs/known-issues.md`: NPCs section rewritten for Phases 12–13 (vision/hearing/fear simplifications, damage model, flood proximity, investigation limits, plus the carried Phase 12 items).
+
+### Next task
+
+- Task: Phase 14 — Procedural Town (roads, lots, buildings, interiors, vegetation, river)
+
+### Recommended next steps
+
+1. Pure town generation in `src/worldgen/` (or `src/town/`): road graph on the height function (bridges over water), block/lot subdivision, then a parameterized house generator (`generateBuilding`-style, plan §60) writing through the same edit path the journal already records — deterministic from (seed, chunk).
+2. NPC anchor assignment: homes/works become the generated buildings' door cells (the `NpcSim` anchors are constructor-injectable candidates today); schedules already consume them.
+3. Keep the reactions honest: town-scale fires/collapses will stampede the population — revisit `ALARM_RADIUS`/hear radii against real building density, and add the 200-NPC stress case to the benchmarks when the town exists.
+4. Utilities (Phase 15) after the town: power/plumbing graphs can hang off the same event bus the NPC reactions already consume (`POWER_LOST` → NPC reactions).
+
+---
 
 ## Session 008 — 2026-09-11
 
@@ -1086,33 +1159,34 @@ pickup instructions in `HANDOFF.md`.
 
 ## Perception
 
-- [ ] Vision
-- [ ] Field of view
-- [ ] Line of sight
-- [ ] Hearing
-- [ ] Sound propagation
-- [ ] Event detection
+- [x] Vision _(`canSee` in src/npc/perception.ts — 24-cell range × 130° FOV × DDA line of sight reusing the Phase 5 raycast; Session 009)_
+- [x] Field of view _(130° horizontal cone on the movement yaw; vertical angle ignored — believable over correct; Session 009)_
+- [x] Line of sight _(solids block sight, water doesn't; ray stops short of the target so burning blocks don't occlude themselves; Session 009)_
+- [x] Hearing _(per-event attenuation radii: explosion `radius·4 + 20`, collapse `min(60, 20 + 2·√cells)`; no wall muffling — known-issues; Session 009)_
+- [x] Sound propagation _(deliberately simplified to radius checks — believable over accurate, documented; Session 009)_
+- [x] Event detection _(`NpcSim.notify` consumes the bus's `explosion`/`structureCollapsed`/`fireIgnited` via main's wiring; sites remembered in the `ThreatBoard`; Session 009)_
 
-_(Perception is Phase 13 (§111); the plan's Phase 12 scope is navigation + idle/wander/schedule. The bus already carries `explosion`/`structureCollapsed`/`fireIgnited`.)_
+_(Perception landed as Phase 13 (§111); the plan's Phase 12 scope was navigation + idle/wander/schedule.)_
 
 ## Reactions
 
 - [x] Wander _(hash-scattered reachable targets within 10 cells, pathed, idle waits between; Session 008)_
 - [x] Go home _(night + exhaustion bedtime → path home → sleep; Session 008)_
 - [x] Go to work _(work-hour commutes, ~60% of decisions, longer stays at the anchor; Session 008)_
-- [ ] Investigate sound
-- [ ] Flee fire
-- [x] React to collapse _(physics-level: support vanishing under a figure → gravity fall → landing re-path; water landing despawns. Fear/investigate reactions are Phase 13; Session 008)_
-- [ ] React to flood
-- [ ] React to power outage
+- [x] Investigate sound _(heard-but-not-terrifying events send figures to a stop-short anchor ≤ 4 cells from the site; they look, and spook if the threat comes within the 12-cell alarm radius — the plan §42 chain; Session 009)_
+- [x] Flee fire _(fireIgnited sites remembered and seen by vision scans; close figures flee, sleepers wake; fear keeps them running while the threat stays near; Session 009)_
+- [x] React to collapse _(physics-level: support vanishing → gravity fall → landing re-path — Session 008; event-level: near collapses panic, distant ones draw investigators — Session 009)_
+- [x] React to flood _(staggered scans feel water at the feet or 4 neighbors → +60 fear → flight; no bus event needed; Session 009)_
+- [ ] React to power outage _(no power system until Phase 15; the bus/event pattern is ready for it)_
+- [x] Explosion damage _(distance falloff, lethal in the crater's inner half, quarter behind LOS-blocking walls; death emits `npcDied`; Session 009)_
 
 ### Milestone
 
-- [ ] **Milestone 10 complete: NPCs live in and react to the world** _(half met — "live in the world" is done and verified (population, schedules, navigation, collapse falls); event-driven reactions wait for Phase 13 perception)_
+- [x] **Milestone 10 complete: NPCs live in and react to the world** _(met — population, schedules, navigation, collapse falls (Phase 12) plus perception, fear, flee/investigate/flood reactions, and explosion damage (Phase 13); verified by 21 unit tests + the 9-check headless scenario, green twice consecutively)_
 
 ---
 
-# Phase 13 — Procedural Town
+# Phase 14 — Procedural Town _(plan §112; checklist header previously misnumbered "Phase 13")_
 
 - [ ] Road generator
 - [ ] Road graph
@@ -1521,7 +1595,7 @@ Only after core deterministic simulation is stable.
 - [x] Fluids _(architecture "Water (Phase 9)" — sim, hooks, rendering, swim, save v2)_
 - [x] Fire _(architecture "Fire (Phase 10)" — cells/heat model, death rules, ignition paths, budget, rendering, interactions)_
 - [x] Structures _(architecture "Structural simulation (Phase 11)" — graph model, cantilever BFS, stress + journal exemption, ticked sim + budgets, collapse flow, fire coupling, viz)_
-- [x] NPCs _(architecture "NPCs (Phase 12)" — nav queries, A\* model, schedule/needs, population, determinism, viz)_
+- [x] NPCs _(architecture "NPCs (Phase 12)" + "NPC reactions (Phase 13)" — nav queries, A\* model, schedule/needs, population, determinism, perception/hearing/threat memory, fear/flee/investigate, explosion damage, viz)_
 - [x] Navigation _(covered in the same section — implicit grid graph, invalidation, budgets; Session 008)_
 - [ ] World generation
 - [ ] Weather

@@ -4,6 +4,71 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.11.0] — 2026-09-11 — Phase 13 (NPC Reactions)
+
+### Added
+
+- **Perception** (`src/npc/perception.ts`, pure): `canSee` — range
+  (24 cells) × horizontal FOV (130°) × voxel line of sight (the Phase 5
+  DDA reused with a solids-block-sight predicate; water never blocks,
+  and the ray stops short of the target so a burning block doesn't
+  occlude itself); hear-radius formulas per event kind (explosion
+  `radius·4 + 20`, collapse `min(60, 20 + 2·√cells)`); and a capped,
+  deduplicated, expiring `ThreatBoard` — the sim's short memory of
+  where bad things happened (one spreading blaze is one threat).
+- **Reactions** (`src/npc/npc.ts`): fear (0–100) per figure with a
+  panic threshold — above it the schedule is overridden by **`flee`**
+  (run away from the nearest remembered threat at 1.6× speed, with
+  per-figure deterministic jitter, sleep interrupted, cower-and-retry
+  when cornered) or **`investigate`** (walk toward a heard noise, stand
+  and look, resume). Figures _see_ remembered threat sites on staggered
+  scans and only panic at what they see up close (alarm radius 12), so
+  an investigator walks to the site, gets a good look, and then spooks —
+  the plan §42 chain: investigate → see destruction → fear → flee.
+  Fear decays ~0.1/tick; figures calm down and resume their lives.
+- **Explosion damage to NPCs**: distance falloff inside `radius + 3`,
+  lethal within the crater's inner half, quarter damage when a wall
+  blocks line of sight. Death despawns the figure and emits a new
+  **`npcDied`** bus event (`cause: 'explosion' | 'drowned'` — the
+  Phase 12 water-sweep now reports too) for Phase 17+ audio/scripts.
+  Malformed (non-finite) events are dropped at the door — NaN survives
+  `Math.min`/`Math.max` and would permanently poison figure state.
+- **Flood response**: no bus event needed — the staggered perception
+  scans check the feet cell + 4 neighbors for water; water at the feet
+  is a +60 fear spike and flight. The same scans wake sleepers for any
+  threat within 5 cells.
+- **Game wiring**: `npc.notify` subscribes to the bus's
+  `explosion`/`structureCollapsed`/`fireIgnited`; `npc.onEvent` flows
+  back out to the bus; fleeing figures render red and investigating
+  figures teal in the pooled InstancedMesh; a `· panic N` HUD line
+  appears while anyone is fleeing; the `bus` joined the `__mw` debug
+  hook.
+- Tests: `tests/npcReactions.test.ts` — 21 tests (330 total): LOS
+  (walls block, water doesn't), FOV, threat board
+  (dedupe/expiry/cap), epicenter kill + `npcDied`, wall-shielded
+  damage, flee-distance + calm-down, sleeper wakes (blast + fire),
+  collapse panic vs. investigate, fire seen/unseen, flood flight,
+  malformed-event immunity, cross-sim determinism with events, and a
+  3000-tick disaster fuzz with invariants.
+- Benchmarks: population tick with active threats 0.12 ms mean
+  (p75 0.02); explosion notify ≈ 2 ms once per blast —
+  `docs/performance.md`.
+- Headless browser verification: new Phase 13 section on the Phase 12
+  page — explosion kill through the real bus wiring, survivor panic +
+  HUD `· panic`, flee distance gained, wall shield, sleeper wake,
+  collapse investigation, flood flight, fear decay.
+- Docs: architecture "NPC reactions (Phase 13)", known-issues NPC
+  section rewritten for Phases 12–13, NPC baselines, README state and
+  layout, this file.
+
+### Fixed
+
+- Harness-only run exposed a real robustness hole: a malformed event
+  with NaN coordinates wrote NaN into every figure's fear (NaN is
+  sticky through `Math.min`/`Math.max`), permanently disabling
+  reactions. `NpcSim.notify` now rejects non-finite event positions
+  (regression-tested).
+
 ## [0.10.0] — 2026-09-11 — Phase 12 (NPCs)
 
 ### Added

@@ -342,6 +342,12 @@ function main(): void {
   });
   fire.onEvent = (event) => bus.emit(event);
   bus.on('fireIgnited', () => sfx.crack());
+  // NPC reactions (Phase 13): the sim hears every explosion, collapse,
+  // and ignition on the bus; its own npcDied events flow back out.
+  npc.onEvent = (event) => bus.emit(event);
+  bus.on('explosion', (event) => npc.notify(event));
+  bus.on('structureCollapsed', (event) => npc.notify(event));
+  bus.on('fireIgnited', (event) => npc.notify(event));
   bus.on('fireExtinguished', (event) => {
     if (event.cause === 'water') {
       dust.puff(event.x + 0.5, event.y + 0.5, event.z + 0.5, {
@@ -797,7 +803,8 @@ function main(): void {
           (fire.burningCount > 0 ? ` · fire ${fire.burningCount}` : '') +
           (structure.pendingCount > 0 ? ` · struct q${structure.pendingCount}` : '') +
           (structureViz.enabled ? ' · struct-viz (G)' : '') +
-          (npc.count > 0 ? ` · npc ${npc.count}` : ''),
+          (npc.count > 0 ? ` · npc ${npc.count}` : '') +
+          (npc.fleeingCount > 0 ? ` · panic ${npc.fleeingCount}` : ''),
       ];
       if (creator.enabled) {
         const b = creator.brush;
@@ -853,6 +860,7 @@ function main(): void {
       structureViz,
       npc,
       npcViz,
+      bus,
       isLocked: () => input.isLocked,
     };
   }

@@ -93,4 +93,26 @@ describe('npc simulation', () => {
   bench('sparse population tick (4 NPCs, mostly idle)', () => {
     sparse.tick(center);
   });
+
+  // Phase 13: with fresh threat points on the board, every scan window
+  // runs vision (FOV + DDA LOS) across the population and panicking
+  // figures re-decide. The board is refilled each bench to keep the
+  // threat memories unexpired.
+  const panicked = populatedSim(16);
+  bench('GATE: population tick with active threats (vision scans + flee)', () => {
+    panicked.notify({ type: 'fireIgnited', x: center.x + 6, y: 9, z: center.z + 6 });
+    panicked.notify({
+      type: 'structureCollapsed',
+      x: center.x - 10,
+      y: 9,
+      z: center.z + 4,
+      cells: 60,
+    });
+    panicked.tick(center);
+  });
+
+  const blast = populatedSim(16);
+  bench('explosion notify (16 NPCs: damage falloff + LOS checks)', () => {
+    blast.notify({ type: 'explosion', x: center.x, y: 9, z: center.z, radius: 5, destroyed: 40 });
+  });
 });
