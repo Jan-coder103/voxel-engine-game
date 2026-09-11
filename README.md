@@ -6,7 +6,7 @@ and NPCs that react to all of it. Long-term roadmap lives in
 `MICRO_WORLD_DEVELOPMENT_PLAN.md`; session-by-session state lives in
 `MICRO_WORLD_PROGRESS.md`.
 
-**Current state:** Phases 0–12 complete — an infinite streamed world of
+**Current state:** Phases 0–14 complete — an infinite streamed world of
 deterministic seeded terrain that is **editable, saveable, and
 destructible**: brush tools, box selection, clipboard, prefabs, and a
 voxel inspector (creator mode), explosions with material resistance,
@@ -18,15 +18,19 @@ embers and smoke — a **structural simulation** with real support graph
 semantics (cantilevered floors and bridges hold within reach of a wall
 or pier, overstressed columns fracture under load with natural terrain
 exempt, collapses cascade progressively, burned-through pillars drop
-their roofs), and **NPCs** — a deterministic wandering population with
+their roofs), **NPCs** — a deterministic wandering population with
 a day/night schedule (work, leisure, sleep at home), needs, A\*
 navigation over the voxel grid with edit-driven re-paths, figures that
 fall when the ground under them vanishes, and **reactions**: figures
 see (range + FOV + line of sight) and hear explosions, collapses, and
 fires, take blast damage (walls shield), feel fear, flee in panic,
-investigate distant noises, and run from rising water (Milestones 1–10
-met; the Phase 8, 9 and 11 gate criteria are verified by tests,
-benchmarks, and headless browser runs).
+investigate distant noises, and run from rising water — all inside a
+**procedural town**: seeded roads and bridges over water, blocks and
+lots, parameterized houses (some two-story with walkable interior
+stairs), shops, industrial buildings, trees, and a population that
+lives in the buildings' doorsteps (Milestones 1–10 met; the Phase 8, 9
+and 11 gate criteria are verified by tests, benchmarks, and headless
+browser runs).
 
 ## Quickstart
 
@@ -39,10 +43,16 @@ npm run dev        # dev server, print the URL it gives you
 
 Append `?seed=1234` to the URL for a different (still deterministic) world.
 
+You spawn on the edge of a **procedural town** (the same seed regenerates
+it bit-for-bit): roads and bridges over water, wood houses (some
+two-story — walk in and up the stairs), brick shops, concrete industrial
+buildings, trees, and wandering figures who sleep at the doorsteps after
+dark. Light a house on fire and watch what the neighborhood does.
+
 Controls: click to capture the mouse, **WASD** move, **Space** jump
 (hold against a bank underwater to climb out), **Esc** release the
 mouse; **LMB** remove, **RMB** place, **MMB** pick material, **F** paint,
-**1–6**/wheel select material (6 = water — it flows), **Ctrl+Z/Y**
+**1–9**/wheel select material (6 = water — it flows), **Ctrl+Z/Y**
 undo/redo, **K** save, **L** load, **N** mute sound. Fall into the void
 and you respawn. The world autosaves (20 s cadence + when the tab hides)
 and restores on reload; `?seed=1234` starts a different fresh world.
@@ -107,6 +117,9 @@ src/npc/                   NPC simulation (pure — no three.js)
   navigation.ts            Walkable-cell queries, A* (implicit grid graph)
   npc.ts                   NpcSim: schedule, needs, fear/flee/investigate, population
   perception.ts            Vision (range/FOV/LOS), hearing radii, threat memory
+src/worldgen/
+  town.ts                  Procedural town (Phase 14): road/lot plan, building
+                           generators, bridges, trees, NPC door anchors (pure)
 src/player/
   controller.ts            Pure physics: look, gravity, AABB per-axis collision
   input.ts                 DOM keyboard + pointer-lock mouse

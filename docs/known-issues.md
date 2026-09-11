@@ -223,6 +223,35 @@ milestone goes here before it goes to the backlog.
   ~5 ms per attempt. A panicking figure with no valid flee target falls
   back to its home anchor, then cowers in place.
 
+## Town (Phase 14)
+
+- **Generated buildings are stress-exempt.** The structural sim only
+  stress-fractures cells with journaled edits, and town buildings come
+  from the generator — a player-built tower on a house roof will not
+  fracture the house's walls until those cells are edited. Lost-support
+  collapse still applies in full: burn or blast a load-bearing wall
+  (or a bridge post) and the roof/deck it carried comes down.
+- **Glass is a solid pale pane.** It culls faces and renders opaque —
+  no transmission, reflections, or crack states yet (plan §29/§31).
+- **Windows don't open and doors aren't doors.** A "door" is a 2-cell
+  opening in the wall; there is no door entity, hinge, lock, or glass
+  pane geometry — Phase 15/16 territory (machines, states).
+- **Pads are concrete, interiors are sparse.** Lot leveling fills a
+  foundation and cuts hills; furniture is a few blocks. No appliances,
+  wiring, or plumbing inside buildings until the utilities phase — the
+  "utility generation" checklist item is deliberately deferred there.
+- **Roads are cosmetic + walkable, not a traffic graph.** No lanes,
+  path nodes, or vehicles yet (Phase 14 traffic is plan §46, later).
+- **NPC home/work anchors are position-only.** Anchors are validated
+  for walkability when a figure picks one; a door can be dynamically
+  blocked later (a walled-in house idles its resident, as before). Far
+  from town the ring fallback resumes — figures met in the wilderness
+  have hash homes, not doorsteps.
+- **Two-story interiors have stairwell fall-through**: the slab
+  openings above the top steps are 1-cell holes; a figure upstairs can
+  path around them, a player can fall through them (believable, not
+  guarded).
+
 ## GUI verification (headless)
 
 - **Automated browser runs have input races.** Under SwiftShader

@@ -31,23 +31,99 @@
 
 ## Overall Phase
 
-**Current phase:** Phase 13 (NPC Reactions) — **complete and committed** (implementation, verification, docs). Milestone 10 met: NPCs live in **and react to** the world. Next: Phase 14 (Procedural Town) per the plan (§112).
+**Current phase:** Phase 14 (Procedural Town) — **complete and committed** (implementation, verification, docs). Milestone 11 met: the world now contains a **procedural explorable town**. Next: Phase 15 (Utilities — electricity, plumbing) per the plan (§113).
 
-**Current milestone:** Milestones 1–10 met. Phase 13 delivers perception (vision = range × FOV × voxel LOS; hearing = per-event attenuation radii), a threat memory, fear, and the reaction states — flee (panic runs, sleep interrupted, walls shield blast damage), investigate (walk toward a heard noise, look, spook), flood flight, explosion damage with `npcDied` events. The plan §42 chain (investigate → see destruction → fear → flee) emerges from the tuning.
+**Current milestone:** Milestones 1–11 met. Phase 14 lays a seeded town over the terrain generator: roads on a 24-cell grid with wooden bridges over water, blocks and 10×10 lots, parameterized buildings (wood houses — some two-story with walkable interior stairs, brick shops, concrete industrial), glass windows, doors, hash-placed furniture, wild trees, and door-front anchors that the NPC population uses as homes and workplaces.
 
-**Overall completion:** ~58% (Phases 0–13 done; deferred: NPC inventory (no item system), hunger consequences (no food), NPC wading/swimming, real day/night clock (Phase 15/16), fire persistence in saves, volumetric smoke, Phase 11 deferrals (lateral load, rigid bodies, wind/rain coupling), fear herding/personality)
+**Overall completion:** ~62% (Phases 0–14 done; deferred: NPC inventory, hunger consequences, NPC wading/swimming, real day/night clock (Phase 16), fire persistence in saves, volumetric smoke, Phase 11 deferrals (lateral load, rigid bodies, wind/rain coupling), fear herding/personality, glass transparency, traffic graph, town utility hooks (Phase 15))
 
-**Last completed task:** Session 009 (2026-09-11) — implemented Phase 13: pure perception module (`src/npc/perception.ts`: `canSee` = 24-cell range × 130° FOV × DDA line of sight reusing the Phase 5 raycast with a solids-block-sight predicate; per-event hear radii; capped/deduplicated/expiring `ThreatBoard`); fear + `flee`/`investigate` activities on `NpcSim` (panic overrides the schedule at ≥ 50, flee runs 1.6× with deterministic jitter and wakes sleepers, investigate stops short of a heard site and looks; staggered perception scans every 10 ticks see threat sites — but only alarm within 12 cells — and feel flood water at the feet); explosion damage (distance falloff, lethal in the crater's inner half, quarter behind LOS-blocking walls) with a new `npcDied` bus event (`explosion | drowned`); NaN-event guard at `notify`'s door (harness-found robustness hole); bus wiring (`npc.notify` in, `npc.onEvent` out), red/teal viz tints, `· panic N` HUD line, `bus` on `__mw`; 21 tests (330 total); threat-tick benchmark 0.12 ms mean; headless Phase 13 section 9/9 green in two consecutive runs, zero page errors.
+**Last completed task:** Session 010 (2026-09-11) — implemented Phase 14: pure town module (`src/worldgen/town.ts`: `planAt` road/lot/wild classification, `lotSpec`/`BuildingSpec` parameterized generators, `applyTown` chunk overlay, bridges, trees, `townAnchors`, `townStats`, `findTownSpawn`); five appended materials (asphalt, concrete, brick, glass, leaves) with derived-table entries — save formats untouched (append-only registry); NPC sim accepts injected home/work anchors + a `groundY` spawn-safety predicate (doors become homes, roofs/canopies/decks rejected as spawn points); spawn moved off building pads via `findTownSpawn`; town chunk overlay 0.92 ms mean; 17 tests (347 total); headless Phase 14 section green; docs updated.
 
 **Current task:** None — session complete, work committed.
 
 **Blocked by:** Nothing.
 
-**Next recommended action:** **Phase 14 (Procedural Town)** per the plan (§112): roads, blocks/lots, building generators (houses first — the NPC home/work anchors currently pick bare terrain cells), interiors, vegetation, river integration. The NPC population, schedules, and reactions are the consumers that make a town immediately alive; utilities (Phase 15) can couple into the existing fire/fluid/structural sims afterwards.
+**Next recommended action:** **Phase 15 (Utilities)** per the plan (§113): a power graph (generator → wire → lamp/consumer) hung off the existing event bus — `POWER_LOST` gets the NPC reaction the Phase 13 wiring already anticipates — then plumbing ("pipe breaks → water leaks" is the believable core; the flooding integration test is the pay-off). The town's buildings, lamps, and NPC schedules are the natural consumers.
 
 ---
 
 # Session Log
+
+## Session 010 — 2026-09-11
+
+**Status:** Complete — Phase 14 (Procedural Town) done, verified, documented, committed. Milestone 11 met.
+
+### Completed
+
+- [x] Pure town module (`src/worldgen/town.ts`, ADR-002/005 apply): **layout** — roads on a 24-cell grid (3 wide, per-seed offsets via `roadOffset`) inside a 96-cell square around the origin, `planAt(x, z)` classifying any column as road/lot/wild in O(1); **lots** — 10×10, 2×2 per block, hash-driven contents; **buildings** — `lotSpec`/`BuildingSpec` (plan §60 `generateBuilding` shape): type (house ~60% / shop / industrial), 6–8 footprint, pad baseY, door side/position, 1–2 floors; viability requires an all-dry pad (footprint ± 1), ceiling clearance (baseY + budget ≤ 29), and inside-the-square.
+- [x] **Building painters**: concrete cut/fill pads with wood/concrete interior floors and grass aprons; walls (wood/brick/concrete) with 2-cell door openings and rhythmic glass windows (skipping corners and door-adjacent positions); roofs — gable (ridge along the long axis, closed gable ends) for houses, flat + brick parapet for shops, concrete slab for industry; furniture (bed + table, shop counters, industrial crates) hash-placed with collision tracking; two-story houses add a slab floor with two stairwell openings and a four-step staircase (one-block steps — NPC-pathable, verified by unit test against the real nav query).
+- [x] **Bridges**: water road columns become wooden decks at sea level (flush with the shoreline) on posts to the lakebed every other cell — structural, so burning a post drops the deck span via the Phase 11 support graph.
+- [x] **Vegetation**: wild trees on a 5-cell lattice (hash-gated, dry grass only, trunk 4–6, layered canopy painting only into air — slopes and buildings never engulfed); park lots get a yard tree. New `leaves` material is fast-burning fuel.
+- [x] **Materials** (append-only, ids 7–11: asphalt, concrete, brick, glass, leaves) with `MATERIAL_HARDNESS`/`MATERIAL_FIRE`/`MATERIAL_STRENGTH` entries. Old saves' 7-material snapshots still validate — no format bump (unit-tested).
+- [x] **NPC town life**: `townAnchors` enumerates every building's door-front cell; `NpcSim` accepts injected home (houses) / work (shops + industry) anchor lists — a spawned figure hash-picks among the six nearest candidates within 48 cells (Manhattan), snaps via `nearestWalkable`, and falls back to the terrain ring for wilderness/unloaded; `groundY` predicate rejects spawn candidates above natural terrain (roofs, canopies, bridge decks); `findTownSpawn` nudges the deterministic spawn off pads/doorsteps/trees onto open ground. main wiring: composed chunk generator (`generateChunk` + `applyTown`), town spawn, anchors + groundY injection, `__mw.town` debug hook (anchors, census, `planAt`).
+- [x] Tests: `tests/town.test.ts` — 17 new (**347 total**, 27 files): plan classification + lot round-trip, same-seed checksum determinism + different-seed towns, unload/regenerate bit-identity, footprint/door/window/floor/roof invariants over real generated worlds, water exclusion, two-story staircase walkability + exact slab openings, bridge decks/posts/plan-consistency/walkability, asphalt resurfacing, tree anatomy + wild-only placement, spawn safety, NPC door-home assignment (majority of figures) + sim determinism, `groundY` rejection, edit-on-town journal persistence, material id stability + legacy snapshot validation.
+- [x] Benchmarks (`benchmarks/town.bench.ts`): towned-chunk overlay **0.92 ms mean** (p75 1.07), outskirts 0.64 ms, wild 0.62 ms, planAt 0.02 ms/256 columns, one-time census ~2.5 ms. Baselines in `docs/performance.md`.
+- [x] Headless browser verification (`.verify/run.mjs`): new Phase 14 section (8 checks on `?seed=13579`) — census, asphalt roads, real doorsteps, bridges (parity-corrected scan: 198 decks / 151 posts), trees, NPC door homes (13/16 figures), town-house fire panic (sim-spawned witness), save/load with a road edit persisting while the town regenerates. **All 8 green in two consecutive runs**, zero page errors. Full-suite residual failures remain the documented Phase 7–10/13 synthetic-input races (mix varies per run; world-state gates pass whenever their inputs land).
+- [x] Docs: architecture "Procedural town (Phase 14)" + terrain-section note, performance town baselines, known-issues new "Town (Phase 14)" section (7 entries), README (state 0–14, quickstart town paragraph, layout, hotbar 1–9), CHANGELOG `[0.12.0]`, this file + checklist headers realigned (Utilities → Phase 15, Weather → Phase 16, matching plan §113/§114).
+
+### Fixed during verification
+
+- **`allLots` enumerated phantom lots (real sim bug, harness-found).** The road-line lattice for `townAnchors`/`townStats` was derived with a broken mod formula, producing lot origins **off the canonical `planAt` lattice** — anchors pointed at buildings that are never painted (bare terrain doorsteps), and the census miscounted. Fix: enumerate true lattice lines (`off + k·SPACING`, `Math.ceil` for the first line ≥ −RADIUS); added the "every anchor is a real doorstep" unit test (air at feet/head, solid pad below, building material in the 8-ring) that pins the class.
+- **Harness bridge scan sampled only post columns**: a step-2 grid aligned to even (x+z) lands exactly on the post lattice — deck cells there have wood, not water, at y=9, so "decks under water" read zero forever. Fix: sample decks on odd x / even z (water shows under the deck) and count posts on the complementary parity. Lesson: **when sampling a periodic lattice, offset the grid — same-parity axes can alias onto the sparse feature entirely.**
+- **Harness door/fire probes were diagonal-blind**: at a doorstep, the facing neighbor at feet level is the open door and the side neighbors are pad cells — the wall material sits diagonally. 4-neighbor probes read "no wall" forever; fixed with 8-ring scans (harness; same pattern the unit test hit).
+- **`findStand` crashed on fractional world coords** (RangeError: voxel index 4098.5): a figure's float position fed the page-side voxel scan; in-bounds fractions silently read the wrong cell, out-of-bounds threw. Fixed by rounding at `findStand`'s door.
+- **Night commute exceeded the harness window**: town door homes can be 30+ cells out (vs the old 3–7 cell ring anchors), so at SwiftShader's ~0.5× sim rate the first sleeper lands after the old 20 s wait expired (the check failed while its own successor — "sleepers rest at home" — passed 20 s later). Fixed: night window 20 s → 45 s.
+- Town-house fire check now spawns its own witness figure via `NpcSim.spawn` (6 cells from the house, inside the alarm radius) instead of waiting for the population to migrate to the teleported player.
+
+### Verification lessons (for future sessions)
+
+- Periodic-feature parity (see the bridge post lattice above) — verify a harness sampling grid against the period of the thing it samples.
+- When a fixture needs *a* instance (figure near a house), create it through the sim's own API (`npc.spawn`) instead of hoping migration delivers one — deterministic and instant.
+- Fractional world coordinates must never reach `world.getVoxel` from harness helpers — round at the helper's door (in-bounds fractions read the wrong cell silently).
+- I ran unit tests + probe scripts during harness runs twice this session; the second full run's failure mix jumped (15 → 20) with load 5+ and recovered on an idle re-run. The idle-machine rule is absolute: one job at a time.
+
+### Deferred deliberately
+
+- Utility generation (checklist item) — lamps/pipes need the Phase 15 power/plumbing systems to mean anything; the buildings, streets, and NPC schedules are the prepared consumers.
+- Traffic graph / lanes (plan §46) — roads are walkable + cosmetic; vehicles are a later phase.
+- Glass transmission/cracks (plan §29/§31), door entities (plan §50) — glass is a solid pane; a "door" is a 2-cell opening.
+- Town utility hooks (power into buildings, plumbing) — Phase 15.
+- 200-NPC town stress benchmark — population stays 16 (cap + transient); revisit at Phase 25+.
+
+### Tests
+
+- Unit tests: 347 passed (27 files; +17 town)
+- Integration: headless browser suite incl. the 8-check Phase 14 town scenario (green); documented Phase 7–10 synthetic-input races remain harness-side; manual GUI pass pending (user)
+- Typecheck: clean (strict) · Lint: clean · Prettier: clean · Build: succeeds (~620 kB minified three.js chunk)
+
+### Benchmarks
+
+- Town: GATE towned-chunk overlay 0.92 ms mean (p75 1.07); outskirts 0.64 ms; wild 0.62 ms; planAt ~0.02 ms/256 columns; census ~2.5 ms one-time — `docs/performance.md`
+- NPC benchmarks unchanged (anchors add a nearest-candidates scan only at spawn)
+
+### Architecture changes
+
+- New dir: `src/worldgen/` (pure — town generation joins terrain under the ADR-002 rule).
+- Materials registry: +5 appended ids (7–11) + derived-table entries; `MATERIAL_FORMAT_VERSION` unchanged (append-only contract).
+- `NpcSimOptions` gains `anchors` and `groundY` (both optional — existing constructions unchanged).
+- main.ts: chunk generator composes terrain + town; spawn via `findTownSpawn`; `__mw.town` debug hook.
+
+### Known issues
+
+- `docs/known-issues.md`: new "Town (Phase 14)" section — stress-exemption of generated buildings, opaque glass, doorway-as-door, sparse interiors/utilities, cosmetic roads, position-only anchors, stairwell fall-through.
+
+### Next task
+
+- Task: Phase 15 — Utilities (power graph, plumbing; plan §113)
+
+### Recommended next steps
+
+1. Power core in `src/sim/` or `src/voxel/utilities.ts` (pure): generator/wire/lamp/consumer graph with local rebuilds on the world hook (structure.ts pattern), `POWER_LOST`/`POWER_RESTORED` bus events — the NPC reaction wiring is already in place to consume them (Phase 13's `notify` switch).
+2. Lamps first: town streets already want them (decorative posts can become functional when power lands); a broken wire should darken a block believably.
+3. Plumbing second: "pipe breaks → water leaks" through the existing fluid sim is the believable core — the Phase 9 fluid is the consumer; the flooding integration test (plan §22) is the pay-off.
+4. Wire NPC schedules into power (work requires powered workplace) only after the graph is solid — believable over accurate.
+
+---
 
 ## Session 009 — 2026-09-11
 
@@ -1188,29 +1264,29 @@ _(Perception landed as Phase 13 (§111); the plan's Phase 12 scope was navigatio
 
 # Phase 14 — Procedural Town _(plan §112; checklist header previously misnumbered "Phase 13")_
 
-- [ ] Road generator
-- [ ] Road graph
-- [ ] Block generation
-- [ ] Lot generation
-- [ ] House generator
-- [ ] Apartment generator
-- [ ] Shop generator
-- [ ] Industrial building generator
-- [ ] Interior generator
-- [ ] Furniture placement
-- [ ] Utility generation
-- [ ] NPC home assignment
-- [ ] Job assignment
-- [ ] Procedural vegetation
-- [ ] River integration
+- [x] Road generator _(24-cell grid, 3 wide, per-seed offsets; dry cells resurface with asphalt — Session 010)_
+- [x] Road graph _(pure `planAt` grid query; no traffic lanes/nodes — vehicles are a later phase, known-issues)_
+- [x] Block generation _(blocks tile the 96-cell town square between road lines)_
+- [x] Lot generation _(10×10 lots, 2×2 per block, hash-driven contents)_
+- [x] House generator _(parameterized `BuildingSpec`: wood walls, gable roof, door + glass windows, furniture — plan §60 shape; Session 010)_
+- [x] Apartment generator _(two-story houses: slab floor, stairwell openings, four-step walkable interior staircase)_
+- [x] Shop generator _(brick, flat roof + parapet, counter)_
+- [x] Industrial building generator _(concrete, slab roof, crates)_
+- [x] Interior generator _(wood/concrete floors, cut/fill pads, upstairs interiors — sparse by design)_
+- [x] Furniture placement _(block-scale beds, tables, counters, crates, hash-placed deterministically)_
+- [ ] Utility generation _(deferred to Phase 15 utilities — lamps/pipes need the power/plumbing systems to mean anything)_
+- [x] NPC home assignment _(house door-front cells injected as `NpcSim` home anchors; figures hash-pick among the six nearest)_
+- [x] Job assignment _(shop/industrial doors as work anchors; terrain-ring fallback for wilderness spawns)_
+- [x] Procedural vegetation _(lattice-gated wild trees, canopy fills air only; yard trees on park lots; flammable `leaves`)_
+- [x] River integration _(wooden bridge decks at sea level on posts to the lakebed; building pads require dry land)_
 
 ### Milestone
 
-- [ ] **Milestone 11 complete: Procedural explorable town**
+- [x] **Milestone 11 complete: Procedural explorable town** _(met — deterministic seeded town with roads, bridges, houses/shops/industry, interiors, trees, and NPC door anchors; verified by 17 unit tests + the headless browser suite; believability limitations in `docs/known-issues.md` "Town (Phase 14)")_
 
 ---
 
-# Phase 14 — Utilities
+# Phase 15 — Utilities _(plan §113; header previously misnumbered "Phase 14")_
 
 ## Electricity
 
@@ -1241,7 +1317,7 @@ _(Perception landed as Phase 13 (§111); the plan's Phase 12 scope was navigatio
 
 ---
 
-# Phase 15 — Weather and Atmosphere
+# Phase 16 — Weather and Atmosphere
 
 - [ ] Day/night cycle
 - [ ] Sun movement

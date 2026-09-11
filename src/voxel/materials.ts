@@ -30,6 +30,13 @@ export const STONE: VoxelMaterialID = 3;
 export const SAND: VoxelMaterialID = 4;
 export const WOOD: VoxelMaterialID = 5;
 export const WATER: VoxelMaterialID = 6;
+// Town materials (Phase 14). Appended after the original seven — ids are a
+// serialization contract and older saves' snapshots validate against these.
+export const ASPHALT: VoxelMaterialID = 7;
+export const CONCRETE: VoxelMaterialID = 8;
+export const BRICK: VoxelMaterialID = 9;
+export const GLASS: VoxelMaterialID = 10;
+export const LEAVES: VoxelMaterialID = 11;
 
 const defs: readonly MaterialDef[] = [
   { id: AIR, name: 'air', color: 0x000000, opaque: false, solid: false },
@@ -39,6 +46,12 @@ const defs: readonly MaterialDef[] = [
   { id: SAND, name: 'sand', color: 0xd8c98a, opaque: true, solid: true },
   { id: WOOD, name: 'wood', color: 0x9c7141, opaque: true, solid: true },
   { id: WATER, name: 'water', color: 0x3d6fd1, opaque: false, solid: false },
+  { id: ASPHALT, name: 'asphalt', color: 0x3b3b40, opaque: true, solid: true },
+  { id: CONCRETE, name: 'concrete', color: 0xb3b1a8, opaque: true, solid: true },
+  { id: BRICK, name: 'brick', color: 0xa5553f, opaque: true, solid: true },
+  // Glass renders as a solid pale pane (no transmission yet — known-issue).
+  { id: GLASS, name: 'glass', color: 0xbfe3ef, opaque: true, solid: true },
+  { id: LEAVES, name: 'leaves', color: 0x3f7d33, opaque: true, solid: true },
 ];
 
 export const MATERIALS: readonly MaterialDef[] = defs;
@@ -78,6 +91,11 @@ const MATERIAL_HARDNESS: Readonly<Record<number, number>> = {
   [SAND]: 0.25,
   [WOOD]: 0.55,
   [WATER]: 0.05,
+  [ASPHALT]: 0.7,
+  [CONCRETE]: 0.8,
+  [BRICK]: 0.65,
+  [GLASS]: 0.15,
+  [LEAVES]: 0.1,
 };
 
 export function hardnessOf(id: VoxelMaterialID): number {
@@ -102,6 +120,8 @@ const MATERIAL_FIRE: Readonly<Record<number, FireProfile>> = {
   // backbone: hard to start from a single spark but burns a long time.
   [GRASS]: { flammability: 0.55, burnDuration: 64 },
   [WOOD]: { flammability: 0.9, burnDuration: 480 },
+  // Foliage flashes over in seconds; a burning canopy rains embers.
+  [LEAVES]: { flammability: 0.75, burnDuration: 32 },
 };
 
 const FIREPROOF: FireProfile = { flammability: 0, burnDuration: 0 };
@@ -128,6 +148,11 @@ const MATERIAL_STRENGTH: Readonly<Record<number, number>> = {
   [SAND]: 10,
   [STONE]: 26,
   [WOOD]: 22,
+  [ASPHALT]: 24,
+  [CONCRETE]: 26,
+  [BRICK]: 22,
+  [GLASS]: 4,
+  [LEAVES]: 6,
 };
 
 export function strengthOf(id: VoxelMaterialID): number {

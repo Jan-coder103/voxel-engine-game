@@ -4,6 +4,63 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.12.0] — 2026-09-11 — Phase 14 (Procedural Town)
+
+### Added
+
+- **Procedural town generation** (`src/worldgen/town.ts`, pure): a
+  seeded 96-cell town square over the terrain generator — roads on a
+  24-cell grid (3 wide, per-seed offsets), 10×10 lots between them,
+  wild land outside. Everything is a pure function of (seed,
+  coordinates): no town state, chunks regenerate identically, and the
+  save format is untouched (buildings are generation; the edit journal
+  persists player changes on top, as always).
+- **Bridges**: road columns in water become wooden decks one block
+  above the waterline on posts to the lakebed every other cell —
+  structurally real, so a burned post drops its span of deck into the
+  lake through the existing support graph.
+- **Buildings**: parameterized generators (plan §60 shape) — wood
+  houses (~60% of built lots, some two-story with a slab floor,
+  stairwell openings, and a four-step walkable interior staircase),
+  brick shops with flat parapet roofs and counters, concrete industrial
+  buildings with slab roofs and crates. Doors (2-cell openings), glass
+  windows on a rhythm, concrete cut/fill pads, hash-placed furniture.
+  Footprints and roof spans stay inside the structural cantilever
+  budget, so fires and blasts collapse them believably instead of
+  instantly.
+- **Vegetation**: lattice-gated wild trees (trunk + canopy, leaves
+  fill only air) and yard trees on park lots. New `leaves` material is
+  fast-burning fuel (fire ecology to come).
+- **Materials** (append-only, ids 7–11): asphalt, concrete, brick,
+  glass (solid pane), leaves — with derived hardness/fire/strength
+  entries. Old saves' 7-material snapshots still validate; no format
+  bump.
+- **NPC town life**: `townAnchors` feeds every building's door-front
+  cell to the sim as home/work candidates — figures hash-pick among
+  the six closest doors within 48 cells (ring fallback for wilderness),
+  spawn candidates above natural terrain (roofs, canopies, decks) are
+  rejected, and the spawn point moves off building pads
+  (`findTownSpawn`).
+- **Benchmarks** (`benchmarks/town.bench.ts`): towned chunk overlay
+  0.92 ms mean (p75 1.07) on top of ~0.6 ms terrain; plan query
+  ~0.02 ms/256 columns; one-time census ~2.5 ms. Baselines in
+  `docs/performance.md`.
+- **17 tests** (`tests/town.test.ts`, 347 total): plan round-trip,
+  determinism (same-seed checksums, different-seed towns), regeneration
+  survival, footprint/door/window/roof invariants, water-exclusion,
+  staircase walkability, bridge decks + posts, vegetation rules,
+  spawn safety, NPC anchor assignment + determinism, `groundY` spawn
+  rejection, edit-on-town persistence, material id stability +
+  backward-compatible snapshots.
+
+### Changed
+
+- Chunk generation composes terrain + town (`generateChunk` +
+  `applyTown`); main spawns via `findTownSpawn`; hotbar grows to 11
+  placeable materials (digits 1–9 + wheel).
+- HUD/debug: `__mw.town` exposes anchors, census, and `planAt` to the
+  verification harness.
+
 ## [0.11.0] — 2026-09-11 — Phase 13 (NPC Reactions)
 
 ### Added

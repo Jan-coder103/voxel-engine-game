@@ -2,7 +2,8 @@ import type { WorldCoordinate } from './voxel/coordinates';
 import { CHUNK_SIZE, WORLD_HEIGHT_CHUNKS } from './voxel/coordinates';
 import { World } from './voxel/world';
 import { streamingParams } from './voxel/streaming';
-import { DEFAULT_TERRAIN, type TerrainParams, findSpawn, generateChunk } from './voxel/terrain';
+import { DEFAULT_TERRAIN, type TerrainParams, generateChunk, heightAt } from './voxel/terrain';
+import { applyTown, findTownSpawn, planAt, townAnchors, townStats } from './worldgen/town';
 import {
   AIR,
   WATER,
@@ -128,18 +129,27 @@ function main(): void {
   const store = new LocalStorageSaveStore();
   const { terrain, restore } = resolveBoot(store);
 
-  const world = new World((chunk) => generateChunk(chunk, terrain));
+  // Terrain, then the town overlay (roads, lots, buildings, trees) — one
+  // pure generation pipeline; the edit journal replays on top of both.
+  const world = new World((chunk) => {
+    generateChunk(chunk, terrain);
+    applyTown(chunk, terrain);
+  });
   const fluid = new FluidSim(world); // before any chunk generation (hooks)
   const fire = new FireSim(world); // chains onto the fluid change hook
   const structure = new StructuralSim(world); // chains after fire (burn-outs collapse)
-  const npc = new NpcSim(world, terrain.seed); // observes edits to re-path (Phase 12)
+  const town = townAnchors(terrain);
+  const npc = new NpcSim(world, terrain.seed, {
+    anchors: town,
+    groundY: (x, z) => heightAt(x, z, terrain),
+  }); // observes edits to re-path; homes/workplaces are town doors (Phase 14)
   if (restore) {
     world.loadEdits(restore.edits);
     fluid.loadLevels(restore.waterLevels ?? {});
   }
   const history = new EditHistory();
 
-  const SPAWN = findSpawn(terrain);
+  const SPAWN = findTownSpawn(terrain);
   // Generate ground around the spawn synchronously so physics is solid
   // on the first frame; everything else streams in.
   const spawnChunkX = Math.floor(SPAWN.x / CHUNK_SIZE);
@@ -861,6 +871,11 @@ function main(): void {
       npc,
       npcViz,
       bus,
+      town: {
+        anchors: town,
+        stats: townStats(terrain),
+        planAt: (x: number, z: number) => planAt(x, z, terrain),
+      },
       isLocked: () => input.isLocked,
     };
   }

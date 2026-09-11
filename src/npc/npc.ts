@@ -114,6 +114,8 @@ const SLEEPY_THRESHOLD = 80;
 const RESTED_THRESHOLD = 20;
 
 const WANDER_RADIUS = 10;
+/** A town anchor farther than this (Manhattan) is "not near" a spawn. */
+const ANCHOR_MAX_DISTANCE = 48;
 
 /** Fear gained per perception scan when a threat of this kind is seen. */
 const FEAR_ON_SIGHT: Record<ThreatKind, number> = {
@@ -156,6 +158,18 @@ export function isWorkHour(hour: number): boolean {
 export interface NpcSimOptions {
   /** Target population (defaults to MAX_POPULATION). */
   population?: number;
+  /**
+   * Town door-front anchors (Phase 14): figures pick homes/workplaces
+   * from these when one is within range and its cell is walkable; the
+   * terrain ring fallback covers wilderness spawns and unloaded chunks.
+   */
+  anchors?: { homes: readonly NavCell[]; works: readonly NavCell[] };
+  /**
+   * Natural terrain height per column. When given, spawn candidates
+   * standing above it (roofs, tree canopies, bridge decks) are rejected
+   * — figures appear on streets and open ground, not on structures.
+   */
+  groundY?: (x: number, z: number) => number;
 }
 
 export class NpcSim {
@@ -175,7 +189,7 @@ export class NpcSim {
   constructor(
     private readonly world: World,
     private readonly seed: number,
-    options: NpcSimOptions = {},
+    private readonly options: NpcSimOptions = {},
   ) {
     this.query = terrainNavQuery((x, y, z) => world.getVoxel(x, y, z));
     this.population = options.population ?? MAX_POPULATION;
@@ -774,6 +788,9 @@ export class NpcSim {
     if (top < 0) return undefined;
     const cell = nearestWalkable(this.query, x, top, z, 3);
     if (!cell) return undefined;
+    // Structure surfaces (roofs, canopies, bridge decks) stand above the
+    // natural terrain: no figure materializes up there.
+    if (this.options.groundY && cell.y > this.options.groundY(cell.x, cell.z)) return undefined;
     for (const other of this.npcs) {
       const dx = other.position.x - (cell.x + 0.5);
       const dz = other.position.z - (cell.z + 0.5);
@@ -815,8 +832,8 @@ export class NpcSim {
       health: 100,
       fear: 0,
       needs: { hunger: this.rand(id, 51) * 20, sleep: this.rand(id, 52) * 30 },
-      home: anchor(61, 3, 7),
-      work: anchor(71, 8, 16),
+      home: this.pickAnchor(this.options.anchors?.homes, cell, id, 61, anchor(61, 3, 7)),
+      work: this.pickAnchor(this.options.anchors?.works, cell, id, 71, anchor(71, 8, 16)),
       path: [],
       pathIndex: 0,
       repath: false,
@@ -826,6 +843,35 @@ export class NpcSim {
     };
     this.npcs.push(npc);
     return npc;
+  }
+
+  /**
+   * A town door anchor near the figure's spawn: among the closest few
+   * candidates the figure hash-picks one (so neighbors don't all share a
+   * door), snapped to a walkable cell; the terrain ring anchor covers
+   * wilderness spawns, far towns, and not-yet-loaded chunks.
+   */
+  private pickAnchor(
+    candidates: readonly NavCell[] | undefined,
+    cell: NavCell,
+    id: number,
+    pickSalt: number,
+    fallback: NavCell,
+  ): NavCell {
+    if (!candidates || candidates.length === 0) return fallback;
+    const near = candidates
+      .map((c) => ({ c, d: Math.abs(c.x - cell.x) + Math.abs(c.z - cell.z) }))
+      .filter((e) => e.d <= ANCHOR_MAX_DISTANCE)
+      .sort((a, b) => a.d - b.d || a.c.x - b.c.x || a.c.z - b.c.z)
+      .slice(0, 6);
+    if (near.length === 0) return fallback;
+    const first = Math.floor(this.rand(id, pickSalt) * near.length);
+    for (let k = 0; k < near.length; k++) {
+      const { c } = near[(first + k) % near.length];
+      const walkable = nearestWalkable(this.query, c.x, c.y, c.z, 2);
+      if (walkable) return walkable;
+    }
+    return fallback;
   }
 
   /** Remove a figure for good (the only deaths: blasts and deep water). */

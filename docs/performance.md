@@ -77,6 +77,24 @@ meshing stays mesh-bound — a greedy mesh through `PackedVolume`
 
 Generation remains an order of magnitude cheaper than meshing.
 
+## Baselines — town (`benchmarks/town.bench.ts`)
+
+2026-09-11, same machine (load ~2.8):
+
+| Scene                                            | Ops/s    | ≈ time/op           |
+| ------------------------------------------------ | -------- | ------------------- |
+| applyTown: town-center chunk (roads + buildings) | ~935     | ~0.92 ms (p75 1.07) |
+| applyTown: outskirts chunk (roads + wild trees)  | ~1,423   | ~0.64 ms            |
+| applyTown: wild chunk (outside the town square)  | ~1,485   | ~0.62 ms            |
+| planAt × 256 (one chunk footprint)               | ~44,400  | ~0.02 ms            |
+| town census (all lots + viability, one-time)     | ~378     | ~2.5 ms             |
+| spawn search from origin                         | ~167,000 | ~0.006 ms           |
+
+The town overlay composes with terrain generation: a fully towned chunk
+costs ~1.5 ms end to end (~0.6 ms terrain + ~0.9 ms overlay) against a
+16 ms frame, and streaming generates a handful of chunks per second in
+steady state. The census runs once at boot for the HUD/debug hook.
+
 ## Baselines — structure (`benchmarks/structure.bench.ts`)
 
 2026-09-10, same VM (idle). The gate: one analysis after a house-scale

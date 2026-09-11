@@ -435,6 +435,64 @@ perception geometry lives in `src/npc/perception.ts`; behavior stays in
   sequences tick identically (unit-tested), and a NaN-event guard keeps
   that true even from hostile input.
 
+## Procedural town (Phase 14)
+
+Phase 14 gives the world its content: a seeded town laid over the
+terrain generator (`src/worldgen/town.ts`, pure like `terrain.ts` —
+ADR-002/005 apply unchanged). Every structure is a pure function of
+(seed, coordinates): chunks generate in any order, regenerate
+identically after unload/prune, and the save format is untouched — town
+buildings are _generation_, and the edit journal on top of them is
+already how player changes persist.
+
+- **Layout**: roads on a 24-cell grid (3 wide) inside a 96-cell square
+  around the origin, with per-seed offsets; the space between roads is
+  tiled with 10×10 lots (2×2 per block); beyond the square the land is
+  wild. `planAt(x, z)` classifies any column (road / lot / wild) in
+  O(1) arithmetic — no town state exists anywhere.
+- **Bridges**: a road column standing in water becomes a wooden deck
+  one block above the waterline (flush with the shore at sea level) on
+  posts to the lakebed every other cell. The posts are structural: burn
+  one and the support graph drops its span of deck into the lake.
+- **Lots**: each lot hash-picks house (~60%) / shop (~18%) /
+  industrial (~22%) or stays a yard, some with a tree. A building is
+  viable only when its whole pad (footprint ± 1) is dry land, the
+  structure clears the world ceiling, and it fits inside the town
+  square — water margins stay unbuilt.
+- **Buildings** are parameterized (`BuildingSpec` derived from the lot
+  origin hash, plan §60's `generateBuilding` shape): 6–8 cell
+  footprint, concrete pad with cut/fill leveling, walls (wood / brick /
+  concrete) with a 2-tall door and rhythmic glass windows, and a roof —
+  gable (ridge along the long axis, closed gable ends) for houses, flat
+  - parapet for shops, slab for industry. Furniture is a handful of
+    hash-placed blocks (bed + table, counter, crates). Spans are sized to
+    stay inside the structural sim's cantilever budget: every roof row
+    anchors to both gable ends, slabs hang ≤ 3 hops from walls.
+- **Two-story houses** have a real interior: a slab floor with two
+  stair openings and a four-step staircase against the wall opposite
+  the door — one-block steps the nav grid already pathes, so NPCs (and
+  the player) can walk upstairs.
+- **Vegetation**: wild trees gate on a 5-cell lattice + hash + dry
+  grass (canopy paints only into air, so slopes and buildings are never
+  engulfed); park lots get a yard tree.
+- **NPC integration**: `townAnchors` enumerates every building's
+  door-front cell; main injects them into `NpcSim` as home (houses) and
+  work (shops/industry) candidates. A spawned figure hash-picks among
+  the six closest candidates within 48 cells and snaps to a walkable
+  cell, falling back to the terrain ring when the town is far or
+  unloaded. A `groundY` predicate (the terrain height function) keeps
+  spawn candidates off roofs, canopies, and bridge decks, and
+  `findTownSpawn` nudges the deterministic spawn off building pads onto
+  open ground.
+- **Materials**: five appended ids (7 asphalt, 8 concrete, 9 brick,
+  10 glass, 11 leaves) with derived hardness/fire/strength entries.
+  Leaves are the one flammable addition (fast flash-over fuel). The
+  registry stays append-only: old saves' 7-material snapshots still
+  validate, so no save-format or material-format bump was needed.
+- **Cost**: the town overlay is ~0.6–0.9 ms per chunk on top of ~0.6 ms
+  terrain (`benchmarks/town.bench.ts`); the one-time boot census is a
+  couple of milliseconds.
+
 ## Chunk meshing and streaming
 
 - Production meshing is `meshVolumeGreedy`: the 0fps per-axis sweep —
@@ -468,7 +526,11 @@ perception geometry lives in `src/npc/perception.ts`; behavior stays in
 - Column profile: bedrock stone at y=0, stone core, 3-voxel dirt band,
   grass surface; columns at/below sea level are sand-capped and filled
   with water up to (not including) sea level.
-- `findSpawn` scans outward ring-by-ring for the first dry column.
+- `findSpawn` scans outward ring-by-ring for the first dry column. The
+  shipped game spawns through `findTownSpawn` (src/worldgen/town.ts):
+  the same deterministic point, nudged to open ground when a building
+  pad, doorstep, or tree claims it — and the chunk generator composes
+  `generateChunk` + `applyTown` (see "Procedural town").
 
 ## Materials
 
