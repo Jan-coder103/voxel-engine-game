@@ -6,7 +6,7 @@ and NPCs that react to all of it. Long-term roadmap lives in
 `MICRO_WORLD_DEVELOPMENT_PLAN.md`; session-by-session state lives in
 `MICRO_WORLD_PROGRESS.md`.
 
-**Current state:** Phases 0–11 complete — an infinite streamed world of
+**Current state:** Phases 0–12 complete — an infinite streamed world of
 deterministic seeded terrain that is **editable, saveable, and
 destructible**: brush tools, box selection, clipboard, prefabs, and a
 voxel inspector (creator mode), explosions with material resistance,
@@ -14,12 +14,16 @@ pooled debris and dust, procedural sound, **flowing water** (cellular
 fluid with sources, gravity, equalization, flow-height rendering,
 swimming, save-format v2), **fire** — heat-driven ignition and spread,
 fuel burn-out, water extinguishing, explosion heat coupling, pooled
-embers and smoke — and a **structural simulation** with real support
-graph semantics: cantilevered floors and bridges hold within reach of a
-wall or pier, overstressed columns fracture under load (natural terrain
-is exempt), collapses cascade progressively, and burned-through pillars
-drop their roofs (Milestones 1–8 met; the Phase 8, 9 and 11 gate
-criteria are verified by tests, benchmarks, and headless browser runs).
+embers and smoke — a **structural simulation** with real support graph
+semantics (cantilevered floors and bridges hold within reach of a wall
+or pier, overstressed columns fracture under load with natural terrain
+exempt, collapses cascade progressively, burned-through pillars drop
+their roofs), and **NPCs** — a deterministic wandering population with
+a day/night schedule (work, leisure, sleep at home), needs, A\*
+navigation over the voxel grid with edit-driven re-paths, and figures
+that fall when the ground under them vanishes (Milestones 1–8 met; the
+Phase 8, 9 and 11 gate criteria are verified by tests, benchmarks, and
+headless browser runs; NPC perception and event reactions are Phase 13).
 
 ## Quickstart
 
@@ -96,6 +100,9 @@ src/creator/               Editor core (pure — produces edit lists)
   inspector.ts             Voxel/material lookups for the HUD panel
 src/sim/
   events.ts                Typed game event bus (ADR-003)
+src/npc/                   NPC simulation (pure — no three.js)
+  navigation.ts            Walkable-cell queries, A* (implicit grid graph)
+  npc.ts                   NpcSim: schedule, needs, wander, population, re-paths
 src/player/
   controller.ts            Pure physics: look, gravity, AABB per-axis collision
   input.ts                 DOM keyboard + pointer-lock mouse
@@ -110,6 +117,7 @@ src/render/                The only three.js code (see ADR-002)
   dust.ts                  Pooled voxel dust puffs
   firefx.ts                Pooled embers + smoke particles for burning cells
   structureViz.ts          Collapse/stress debug overlay (G key)
+  npcViz.ts                Pooled InstancedMesh figures (activity-tinted)
 src/audio/
   sfx.ts                   Procedural WebAudio destruction sounds (DOM adapter)
 tests/                     Vitest unit tests (node environment)

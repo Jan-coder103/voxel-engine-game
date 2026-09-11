@@ -165,6 +165,43 @@ milestone goes here before it goes to the backlog.
   dev VM; see `docs/performance.md`) and run at most one per fixed step
   — a large multi-stage collapse spreads across ticks by design.
 
+## NPCs (Phase 12)
+
+- **No perception or reactions yet** (that is Phase 13): figures ignore
+  explosions, fires, and collapses except where physics forces them —
+  a collapse under their feet makes them fall, and world writes that
+  sever their path make them re-path. They do not flee, investigate,
+  or drown on purpose; only landing in water after a fall despawns
+  them ("swept away").
+- **Grid-following movement, not physics**: figures glide between cell
+  centers at a fixed speed with vertical easing. They cannot jump,
+  climb more than one block per step, or path drops deeper than
+  `MAX_DROP` (3). During the easing band a figure visually overlaps
+  the block it is climbing — cosmetic, not a support violation.
+- **The schedule clock is not the world clock**: a tick counter (40 s
+  per game day) drives bed/work hours; there is no sun, no lighting
+  change, no weather coupling. Phase 15/16 (atmosphere) should replace
+  the counter's role with the real day/night cycle.
+- **Needs are half-wired**: sleep gates behavior (bedtime + exhaustion
+  both work); hunger rises and is read in tests/debug only — there is
+  no food to eat and no consequence yet. Health exists (100) with no
+  damage source; explosions do not hurt figures until Phase 13 wires
+  reactions.
+- **Population is transient**: NPCs are not in the save format
+  (deliberate — they respawn deterministically around the player, and
+  a reload repopulates identically). Home/work anchors are picked at
+  spawn from nearby walkable cells, not from town data — there are no
+  buildings to assign yet (Phase 13/14).
+- **No figure-figure collision**: NPCs can overlap each other (and the
+  player). Believable at population 16; revisit with the 200-NPC
+  benchmark (Phase 25+).
+- **NPCs avoid water entirely** — the nav query marks water cells not
+  open, so lakes are walls. Wading/swimming for NPCs is unmodeled.
+- **Sealed-in figures idle**: an unreachable home (walled in) ends the
+  decision in a long idle wait and retry, not path-finding around the
+  obstacle; the A\* budget (512 expansions) caps the wasted work at
+  ~5 ms per attempt.
+
 ## GUI verification (headless)
 
 - **Automated browser runs have input races.** Under SwiftShader

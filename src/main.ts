@@ -17,6 +17,7 @@ import { FluidSim } from './voxel/fluid';
 import { FireSim } from './voxel/fire';
 import { debrisFromCells, explode } from './voxel/damage';
 import { StructuralSim } from './voxel/structure';
+import { NpcSim } from './npc/npc';
 import {
   AutosavePolicy,
   deserializeWorld,
@@ -49,6 +50,7 @@ import { DebrisSystem } from './render/debris';
 import { DustSystem } from './render/dust';
 import { FireFx } from './render/firefx';
 import { StructureViz } from './render/structureViz';
+import { NpcViz } from './render/npcViz';
 import { SoundFx } from './audio/sfx';
 import { LocalStorageSaveStore } from './persistence/localStorageStore';
 import { InputManager } from './player/input';
@@ -130,6 +132,7 @@ function main(): void {
   const fluid = new FluidSim(world); // before any chunk generation (hooks)
   const fire = new FireSim(world); // chains onto the fluid change hook
   const structure = new StructuralSim(world); // chains after fire (burn-outs collapse)
+  const npc = new NpcSim(world, terrain.seed); // observes edits to re-path (Phase 12)
   if (restore) {
     world.loadEdits(restore.edits);
     fluid.loadLevels(restore.waterLevels ?? {});
@@ -329,6 +332,7 @@ function main(): void {
   const dust = new DustSystem(engine.scene);
   const fireFx = new FireFx(engine.scene);
   const structureViz = new StructureViz(engine.scene);
+  const npcViz = new NpcViz(engine.scene);
   const colorFor = (material: VoxelMaterialID) => getMaterial(material).color;
   let explosionSeed = 1;
 
@@ -579,6 +583,7 @@ function main(): void {
         fluid.loadLevels(data.waterLevels ?? {});
         fire.reset(); // loads are world resets: no fire survives a load
         structure.reset();
+        npc.reset();
         history.clear();
         autosave.markDirty();
       } catch (error) {
@@ -684,6 +689,9 @@ function main(): void {
       // Structural analysis last: it sees this step's edits, burn-outs
       // and the previous stage of any cascading collapse (Phase 11).
       structure.tick(STRUCTURE_ANALYSES_PER_TICK);
+      // NPCs join the same fixed step (Phase 12): schedule, paths,
+      // movement, population. Population centers on the player.
+      npc.tick(player.position);
       accumulator -= FIXED_DT;
     }
 
@@ -704,6 +712,8 @@ function main(): void {
     // Fire feedback: embers + smoke emitted from the burning cells.
     fireFx.update(frameDt, fire.burningList());
     structureViz.update(frameDt);
+    // NPC figures mirror the sim's population.
+    npcViz.update(npc.list());
 
     // Targeting + edit previews (render only; input handled above).
     const hit = input.isLocked ? targetHit() : undefined;
@@ -786,7 +796,8 @@ function main(): void {
           (fluid.activeCount > 0 ? ` · water ${fluid.activeCount}` : '') +
           (fire.burningCount > 0 ? ` · fire ${fire.burningCount}` : '') +
           (structure.pendingCount > 0 ? ` · struct q${structure.pendingCount}` : '') +
-          (structureViz.enabled ? ' · struct-viz (G)' : ''),
+          (structureViz.enabled ? ' · struct-viz (G)' : '') +
+          (npc.count > 0 ? ` · npc ${npc.count}` : ''),
       ];
       if (creator.enabled) {
         const b = creator.brush;
@@ -840,6 +851,8 @@ function main(): void {
       fireFx,
       structure,
       structureViz,
+      npc,
+      npcViz,
       isLocked: () => input.isLocked,
     };
   }

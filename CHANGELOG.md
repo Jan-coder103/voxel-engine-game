@@ -4,6 +4,60 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.10.0] — 2026-09-11 — Phase 12 (NPCs)
+
+### Added
+
+- **NPC simulation** (`src/npc/npc.ts`, pure): a deterministic
+  population of up to 16 wandering figures around the player —
+  schedule-driven days on a tick-count clock (100 ticks/hour, 40 s per
+  game day): nights and exhaustion send figures home to sleep until
+  dawn or rested, work hours send most decisions to a work anchor, the
+  rest is hash-scattered wandering. Needs accumulate deterministically
+  (sleep gates behavior; hunger rises with no consumer yet — no food
+  exists). One physical rule: a figure whose support vanishes (collapse,
+  dig) falls with gravity and re-paths on landing; landing in water
+  despawns it. No sequential RNG — every choice hashes
+  (id, salt, tick, seed), so identical tick sequences are bit-identical.
+- **Navigation** (`src/npc/navigation.ts`, pure): walkable-cell queries
+  (open headroom ×2 + solid floor, water not walkable) and A\* over the
+  implicit grid graph — moves are flat, +1, or drops up to `MAX_DROP`
+  (3) with a lip-clearance rule; Manhattan heuristic, insertion-order
+  tie-breaks, `maxExpansions` budget (the sim decides with 512, so a
+  hopeless search costs ~5 ms). Local invalidation (plan §40): the sim
+  observes `World.onVoxelChanged` and re-paths only paths severed by an
+  edit (cell or floor touched), budgeted at `DECIDES_PER_TICK = 3`
+  searches per fixed step.
+- **NPC figures** (`src/render/npcViz.ts`): one pooled InstancedMesh of
+  capsules tinted by activity (wander green, goto yellow, idle slate,
+  sleep dark blue; sleepers lie down), driven per frame from the sim.
+- **Game wiring**: the sim joins the fixed step (after the structural
+  sim), population centers on the player, `· npc N` joins the HUD, and
+  `npc`/`npcViz` are exposed on the `__mw` debug hook. NPCs are
+  transient by design — not in the save format; a reloaded world
+  repopulates deterministically.
+- Tests: `tests/navigation.test.ts` + `tests/npc.test.ts` — 31 tests
+  (309 total): walkability/anchoring, routing (walls, ledges, cliffs,
+  water, lip clearance, budgets, determinism), path-invalidation
+  helper, real-terrain paths; spawn/clock, needs, schedule transitions
+  (night sleep at home → dawn wake, exhaustion bedtime, wandering),
+  wall-rise re-pathing, collapse fall, water sweep, population
+  fill/despawn, cross-sim determinism, and a 5000-tick invariant fuzz.
+- Benchmarks (`benchmarks/npc.bench.ts`): mid-distance re-path ~1 ms;
+  sealed-goal worst case ≈ 5 ms at the 512-expansion budget; full
+  population tick 0.03 ms mean. Baselines in `docs/performance.md`.
+- Headless browser verification: new Phase 12 section on `?seed=24680`
+  — 10 checks, all green, zero page errors: population fills, HUD
+  counter, upright invariants, live wandering, instanced rendering,
+  night → sleep at home, dawn wake, collapse fall.
+- Docs: architecture "NPCs (Phase 12)", NPC baselines, known-issues
+  "NPCs (Phase 12)" section, README state/layout, this file.
+
+### Fixed
+
+- `nearestWalkable` y-window widened ±2 → ±4 so slope anchoring finds
+  stands on modest terrain steps (found by the fixture tests).
+
 ## [0.9.0] — 2026-09-10 — Phase 11 (Structural Simulation)
 
 ### Added

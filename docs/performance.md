@@ -88,13 +88,13 @@ material helpers (which under vitest's module transform turn imported
 constants into namespace lookups), and the snapshot consults each
 chunk's edit journal once instead of per cell.
 
-| Scene                                                     | ≈ time/op                     |
-| --------------------------------------------------------- | ----------------------------- |
-| **GATE** — house-scale analysis, real terrain (25×32×25)  | **2.19 ms** mean, p75 1.96 ms |
-| worst case — fully solid stone region (every cell BFS)    | 3.02 ms mean, p75 3.00 ms     |
-| large brush-delete region, real terrain (41×32×41, 54k)   | 4.77 ms mean, p75 4.60 ms     |
-| overstress analysis — 24-tall wood tower on terrain       | 1.94 ms mean, p75 1.86 ms     |
-| scenario — knock out a pillar → full cascade to rest      | ≈ 7.5 ms **total** over ~16 ticks (one analysis ≤ ~3 ms per fixed step) |
+| Scene                                                    | ≈ time/op                                                               |
+| -------------------------------------------------------- | ----------------------------------------------------------------------- |
+| **GATE** — house-scale analysis, real terrain (25×32×25) | **2.19 ms** mean, p75 1.96 ms                                           |
+| worst case — fully solid stone region (every cell BFS)   | 3.02 ms mean, p75 3.00 ms                                               |
+| large brush-delete region, real terrain (41×32×41, 54k)  | 4.77 ms mean, p75 4.60 ms                                               |
+| overstress analysis — 24-tall wood tower on terrain      | 1.94 ms mean, p75 1.86 ms                                               |
+| scenario — knock out a pillar → full cascade to rest     | ≈ 7.5 ms **total** over ~16 ticks (one analysis ≤ ~3 ms per fixed step) |
 
 Reading: the sim runs at most one analysis per fixed step, so even a
 multi-stage collapse costs one budgeted slice per tick; the 5 ms gate
@@ -107,12 +107,12 @@ finishes the rest across subsequent ticks).
 2026-09-09, same machine (worst case: fully-solid stone world, i.e.
 every scanned cell is real work):
 
-| Scene                                         | ≈ time/op |
-| --------------------------------------------- | --------- |
-| explode r=6 in solid stone                    | ~5.0 ms   |
-| explode r=10 in solid stone (creator max)     | ~6.8 ms   |
-| support analysis — house-scale region (fully solid) | ~7.5 ms |
-| support analysis — supported region (fully solid)   | ~8.7 ms |
+| Scene                                               | ≈ time/op |
+| --------------------------------------------------- | --------- |
+| explode r=6 in solid stone                          | ~5.0 ms   |
+| explode r=10 in solid stone (creator max)           | ~6.8 ms   |
+| support analysis — house-scale region (fully solid) | ~7.5 ms   |
+| support analysis — supported region (fully solid)   | ~8.7 ms   |
 
 The last two rows now run the Phase 11 `analyzeStructure` over the
 same regions (old checkSupport: ~10/14 ms). They are the pessimistic
@@ -168,6 +168,29 @@ heat is only deposited into flammable cells). The burn-out scenario is a
 one-time ~1 s of total sim work spread across the fire's whole life; the
 5 s of embers/smoke afterward cost a pool-bounded particle step (same
 class as debris/dust: 256 embers + 512 smoke instances, capped emission).
+
+## Baselines — NPCs (`benchmarks/npc.bench.ts`)
+
+2026-09-11, same machine. The gates: a typical re-path must be well
+under a millisecond (main allows 3 A\* decisions per fixed step), and a
+full population tick must be far below the 16 ms frame. Terrain worlds
+are 7×7 chunk columns around spawn.
+
+| Scene                                                   | ≈ time/op              |
+| ------------------------------------------------------- | ---------------------- |
+| GATE — mid-distance re-path on real terrain (~24 cells) | 0.7–1.1 ms mean        |
+| worst case — sealed goal (full 512-expansion flood)     | ≈ 5 ms                 |
+| nearestWalkable anchor scan (r=6)                       | ≈ 6 µs                 |
+| GATE — full population tick (16 wandering NPCs)         | 0.03 ms mean (p99 0.4) |
+| sparse population tick (4 NPCs, mostly idle)            | 0.007 ms mean          |
+
+Reading: the decide budget (3 × 512 expansions) bounds a collapse-burst
+tick at ≈ 15 ms worst case, but hopeless searches are rare by
+construction — an unreachable target ends in a long idle wait, not a
+retry storm — and the common re-path is ~1 ms. The population tick is
+noise-level; NPC costs are dominated by A\*, which the budget already
+caps. Note the VM caveat below: numbers are comparable between idle
+runs only.
 
 ## Runtime (dev session, Phase 5–8 demo)
 

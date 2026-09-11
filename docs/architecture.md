@@ -318,6 +318,69 @@ approximation with a ticked, budgeted sim over a graph of solid cells
   fell stays readable after the fact. One pooled InstancedMesh, same
   discipline as debris/dust.
 
+## NPCs (Phase 12)
+
+`src/npc/` adds a small population of wandering figures: a pure
+simulation (`npc.ts`) over the navigation queries and A\* in
+`navigation.ts`, mirrored into one pooled InstancedMesh by
+`src/render/npcViz.ts`. Believability over accuracy, plan §37/§110:
+there are no rigid bodies, no animation, no perception yet.
+
+- **Navigation** treats every standable cell as a graph node — the
+  graph is implicit in the voxel grid, so edits never require a nav
+  rebuild (plan §40). A cell is walkable when it and the cell above are
+  open (not solid, not water) and the cell below is solid; moves are
+  flat, one up, or a drop of up to `MAX_DROP` (3), with a lip-clearance
+  rule so deep drops must fall clear past the ledge. `findPath` is A\*
+  with a Manhattan heuristic (admissible: every move costs 1 and
+  changes XZ distance by exactly 1), a binary heap with insertion-order
+  tie-breaks, fixed neighbor order, and a hard `maxExpansions` budget
+  (the sim decides with 512) — hopeless searches cost ~5 ms, not ∞.
+  `terrainNavQuery` implements the standard rules over the World read;
+  tests build bespoke queries from heightmaps.
+- **Local invalidation**: `NpcSim` chains onto `World.onVoxelChanged`
+  (read-only — NPCs never write voxels) and marks any path that crosses
+  the changed cell — or its floor — for a re-path. Path lists are short
+  cell arrays, so "which paths does this edit touch" is a few dozen
+  comparisons per edit; a collapse invalidates only the paths it
+  actually severed, and `DECIDES_PER_TICK` (3) bounds the A\* work per
+  fixed step, so burst re-paths spread over ticks.
+- **Behavior** is a tiny schedule state machine per figure —
+  `idle → wander → goto → sleep`, each with an `intent`
+  (home / work / wander). The clock is a tick counter (100 ticks per
+  game hour, 2400 per day ≈ 40 s real time) starting at 08:00; nights
+  and exhaustion (`needs.sleep > 80`) send figures home to sleep until
+  dawn or rested, work hours (09:00–17:00) send ~60% of decisions to
+  the work anchor, and the rest is wandering: a hash-scattered target
+  within 10 cells, pathed, then an idle wait. Needs accumulate
+  deterministically (sleep 0→100 per day awake, 4× faster recovery
+  asleep; hunger rises with no consumer yet — no food exists).
+- **Movement** is grid-following at `NPC_SPEED` (2.2 cells/s) with
+  vertical easing between path cells (no teleporting up steps). The one
+  physical rule: when the support under a figure vanishes — a collapse,
+  a dig — it falls with gravity until it lands, then re-paths; landing
+  in water despawns the figure ("swept away"). `stepFall` checks both
+  the current support and, while following a path, the target cell's
+  floor, so pathed drops down ledges never read as "ground vanished".
+- **Population** is transient and never saved: `maintain` despawns
+  figures beyond `DESPAWN_RADIUS` (80) from the player and spawns
+  toward `MAX_POPULATION` (16) at ≤ 1 per fixed step, ring-scattered by
+  hash at 14–60 cells with 3 cells of personal space. A reloaded world
+  repopulates deterministically — no NPC state in the save format.
+- **Determinism** (ADR-005): no sequential RNG anywhere — every
+  "random" choice hashes (npc id, salt, tick, world seed) through the
+  terrain `hash3`. Identical worlds + tick sequences produce
+  bit-identical populations, paths, and schedules (unit-tested).
+- **Rendering** (`src/render/npcViz.ts`): one InstancedMesh of
+  capsules, tinted by activity (green wandering, yellow commuting,
+  slate idle, dark blue asleep; sleepers lie down), updated per frame
+  from `sim.list()`. Same pool discipline as debris/dust (ADR-004).
+- **Reaction hooks for Phase 13**: the bus already carries
+  `explosion`, `structureCollapsed`, `fireIgnited`; the sim's
+  invalidation hook already reacts to collapse-shaped world changes.
+  Perception (vision/hearing) and fear/flee/investigate behaviors land
+  next.
+
 ## Chunk meshing and streaming
 
 - Production meshing is `meshVolumeGreedy`: the 0fps per-axis sweep —

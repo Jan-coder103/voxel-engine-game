@@ -31,23 +31,97 @@
 
 ## Overall Phase
 
-**Current phase:** Phase 11 (Structural Simulation) — **complete and committed** (implementation, verification, docs)
+**Current phase:** Phase 12 (NPCs) — **complete and committed** (implementation, verification, docs). Perception + event reactions remain for Phase 13.
 
-**Current milestone:** Milestones 1–8 met plus Milestone 9: "Buildings can collapse" — cantilever-aware support graph, simplified stress with failure thresholds, progressive cascading collapse, fire→collapse coupling, structural debug overlay, all gate criteria verified.
+**Current milestone:** Milestones 1–9 met. Phase 12 delivers "NPCs live in the world": deterministic wandering population, schedule (work/leisure/sleep-at-home), needs, A\* navigation with edit-driven local invalidation, collapse falls. Milestone 10 ("…and react to the world") is half met — physics-level reactions (falls, re-paths) only; fear/flee/investigate is Phase 13.
 
-**Overall completion:** ~50% (Phases 0–11 done; deferred: lateral load distribution (roof weight piling onto pillars), rigid-body engine for detached pieces (debris pipeline covers the feel), wind/rain coupling (needs weather), fire persistence in saves, volumetric smoke, sustained fire audio)
+**Overall completion:** ~55% (Phases 0–12 done; deferred: NPC perception/reactions (Phase 13), NPC inventory (no item system exists), hunger consequences (no food exists), NPC wading/swimming, real day/night clock (Phase 15/16), plus the Phase 11 deferrals: lateral load distribution, rigid-body engine, wind/rain coupling, fire persistence in saves, volumetric smoke, sustained fire audio)
 
-**Last completed task:** Session 007 (2026-09-10) — implemented Phase 11: `StructuralSim` in `src/voxel/structure.ts` replacing the Phase 8 edit-time `checkSupport` (deleted): 0/1-cost cantilever support BFS over solid cells (vertical free, groundless horizontal hops cost 1, `MAX_CANTILEVER = 6`), vertical stack-load stress vs the new `MATERIAL_STRENGTH` table with journaled-cell-only eligibility (natural terrain exempt), progressive cascading collapse as grouped undoable commands (4096-cell cap, cascade finishes), 150k-cell region budget with full-height column scans, chunk-block snapshot with per-chunk journal lookups and a precomputed solidity buffer (hot passes call nothing); `World.onVoxelChanged` gained the `previous` material so only support-losing transitions queue analyses (placements/water never do); fire burn-out collapses structures automatically (the Phase 10 deferred coupling); `StructureViz` debug overlay (G) + HUD pending counter; 24 structure tests (278 total); benchmark gate 2.19 ms house-scale on real terrain (< 5 ms budget); headless browser Phase 11 section all green.
+**Last completed task:** Session 008 (2026-09-11) — implemented Phase 12: pure `NpcSim` (`src/npc/npc.ts`) + navigation (`src/npc/navigation.ts`): walkable-cell queries (open headroom ×2 + solid floor, water excluded), A\* over the implicit grid graph (Manhattan heuristic, insertion-order tie-breaks, flat/+1/drop ≤ 3 moves with lip-clearance rule, 512-expansion decide budget), local invalidation by observing `World.onVoxelChanged` (re-path only paths severed by an edit, ≤ 3 decides/fixed step), schedule state machine on a tick-count clock (100 ticks/hour: night + exhaustion → sleep at home until dawn/rested, work hours → mostly commute, else wander), deterministic needs (sleep gates behavior, hunger rises unconsumed), hash-based randomness (no sequential RNG), population maintenance around the player (spawn ≤ 1/tick ring-scattered, despawn past 80, transient — not in saves), collapse fall with gravity (water landing = despawn); `NpcViz` pooled instanced figures (activity-tinted, sleepers lie down) + HUD `· npc N` + `__mw` exposure; 31 tests (309 total); benchmark gates ~1 ms re-path / 0.03 ms population tick; headless browser Phase 12 section 10/10 green.
 
 **Current task:** None — session complete, work committed.
 
 **Blocked by:** Nothing.
 
-**Next recommended action:** **Phase 12 (NPCs)** per the plan: entity definition, transform/health/needs, wander + schedule behavior, then navigation (walkable cells → graph → A*) with local invalidation on edits. The event bus already carries everything NPCs will react to (explosions, collapses, fire).
+**Next recommended action:** **Phase 13 (NPC Reactions)** per the plan (§111): perception (vision distance/FOV/line-of-sight, hearing with simple propagation), fear, and the event-driven reactions — the bus already carries `explosion`/`structureCollapsed`/`fireIgnited`, and `NpcSim` already demonstrates the re-path-on-world-change pattern. Natural follow-ups: damage to NPCs from explosions (health is wired, no source yet), flee-to-home behavior, investigate-sound state.
 
 ---
 
 # Session Log
+
+## Session 008 — 2026-09-11
+
+**Status:** Complete — Phase 12 (NPCs) done, verified, documented, committed. Phase 12 scope per the plan (§110: navigation, idle behavior, wander, schedule); perception/reactions remain for Phase 13.
+
+### Completed
+
+- [x] Navigation core (`src/npc/navigation.ts`, pure): `terrainNavQuery` (walkable = open feet cell + open headroom + solid floor; water not open), `nearestWalkable` ring anchor (±4 y window), `findPath` A\* — implicit grid graph (no nav structure to rebuild after edits, plan §40), fixed neighbor order, binary heap with insertion-order tie-breaks, Manhattan heuristic, moves flat/+1/drop ≤ `MAX_DROP` (3) with a lip-clearance rule for deep drops (no clipping through protruding columns), `maxExpansions`/`maxCost` budgets, `pathTouches` invalidation helper (checks path cells AND their floors).
+- [x] NPC simulation (`src/npc/npc.ts`, pure): `NpcSim` over `NpcState` (position/yaw/activity/intent/health/needs/home/work/path/waitTicks/falling). Schedule on a tick-count clock (`TICKS_PER_HOUR = 100`, day = 2400 ticks ≈ 40 s, starts 08:00): night (22–06) or `sleep > 80` → path home → sleep until dawn + rested (≤ 20); work hours (09–17) → 60% commute to the work anchor; else wander (hash-scattered target ≤ 10 cells, pathed, idle wait). Needs deterministic: sleep +100/day awake, −4× asleep; hunger +0.1/day (no consumer — documented). Movement grid-following at 2.2 cells/s with vertical easing; fall physics when support vanishes (checks current support AND path target floor so pathed drops don't misfire); water landing despawns ("swept away").
+- [x] Determinism: no sequential RNG — every "random" choice is `hash3(id, salt, timeTicks, seed)`; identical worlds + tick sequences reproduce bit-identical populations/schedules (unit-tested). Population maintenance: ≤ 1 spawn/tick (ring 14–60, personal space 3), despawn past `DESPAWN_RADIUS = 80`, cap `MAX_POPULATION = 16`; **transient — not in the save format** (reload repopulates deterministically).
+- [x] Local invalidation (Phase 12 deliverable, plan §40): the sim chains onto `World.onVoxelChanged` (read-only; NPCs never write voxels, so hook order vs fluid/fire/structure is irrelevant) and marks only paths whose cells/floors are touched; `DECIDES_PER_TICK = 3` bounds A\* work per fixed step (collapse bursts spread across ticks).
+- [x] Rendering (`src/render/npcViz.ts`): one pooled InstancedMesh of capsules (ADR-004), activity-tinted (wander green / goto yellow / idle slate / sleep dark blue), sleepers lie down; unlit `MeshBasicMaterial` (scene has no lights). HUD `· npc N`; `npc`/`npcViz` on `__mw`; `npc.reset()` on load.
+- [x] main.ts wiring: `NpcSim` constructed after `StructuralSim`; `npc.tick(player.position)` in the fixed step after the structural tick; `npcViz.update(npc.list())` per frame.
+- [x] Tests: `tests/navigation.test.ts` (17) + `tests/npc.test.ts` (14) — 31 new, **309 total** (25 files): walkability + anchoring (incl. water exclusion via `terrainNavQuery`), routing (straight-line optimality, wall gap, sealed goal, 1-step climbs vs 2-high refusals, drop ≤ 3 vs deeper, lip clearance, water avoidance, budgets, determinism), `pathTouches`, real-terrain paths; clock, spawn anchoring, needs (deterministic rise, sleep restores), night → sleep-at-home → dawn wake, exhaustion bedtime at noon, wandering, wall-rise re-path (invariant: never inside solid after), collapse fall, water sweep, population fill/despawn, cross-sim determinism, 5000-tick fuzz with mid-run edits.
+- [x] Benchmarks (`benchmarks/npc.bench.ts`): **GATE re-path ~1 ms** (24 cells, real terrain); sealed-goal worst case ≈ 5 ms at the 512-expansion decide budget; anchor scan ~6 µs; **GATE full population tick 0.03 ms mean** (p99 0.4); sparse (4) 0.007 ms. Baselines in `docs/performance.md`.
+- [x] Gates green: typecheck (strict), lint, Prettier, full suite **309 tests**. (Build not re-run this session; no bundler-visible changes beyond main.ts imports — three.js chunk unaffected by pure modules.)
+- [x] Headless browser verification (Playwright + SwiftShader, `.verify/run.mjs`): new Phase 12 section on `?seed=24680` — **10 checks, all green, zero page errors** (verified across two runs): population fills to budget, HUD counter, upright invariants (not falling, not inside solid, easing-tolerant support read), live wandering (positions change), instanced render count, fast-forward to 23:00 → figures sleep at their home anchors, dawn wake, ground removed under a figure → it falls. The existing Phase 7–11 sections show only the documented synthetic-input race mix (keys/clicks dropped at ~10 fps software rendering; failure sets differ per run, world-state gates — conservation, Phase 11 cantilever/stress, prefab persistence — pass in every run where their inputs landed).
+- [x] Docs: architecture "NPCs (Phase 12)" section, performance NPC baselines, known-issues new "NPCs (Phase 12)" section (8 entries), README (state + layout), CHANGELOG `[0.10.0]`, this file.
+
+### Fixed during verification
+
+- **Two Phase 12 harness checks were flaky by construction**: the "standing" check read the raw floor under the feet — mid-climb easing reads solid (false negative) and pathed drops read unsupported; the "fall" check removed `round(y)-1`, which isn't the support block when the figure is mid-easing (sim rule: `ceil(y)-1`). Checks now use sim-level invariants (falling flag + easing-tolerant support read; support block AND one deeper removed).
+- **`nearestWalkable` y-window ±2 → ±4**: the ring anchor couldn't find stands across modest terrain steps from a 4-cell offset (caught by fixture tests, not the harness).
+- **Bench worst case measured nothing**: an unanchored "sealed" goal in unloaded terrain early-outs on `!walkable(goal)` (0.9 µs); anchoring the goal first, then walling it in, gives the real 512-expansion flood (~5 ms). Probe-first lesson: measure what a bench actually measures before recording it.
+- **`decide()` budget lowered 1024 → 512 expansions**: the real 512-expansion flood costs ~5 ms (2048 would be ~20 ms); × 3 decides/tick keeps a collapse-burst tick inside the frame. Unreachable targets end in long idle waits, so hopeless searches don't retry-storm.
+
+### Verification lessons (for future sessions)
+
+- Harness checks about _continuous_ position/state must tolerate the sim's discrete easing bands — read the sim's own rule (e.g. `ceil(y)-1` support) or use sim-level flags (`falling`) instead of re-deriving geometry in the check.
+- The input-race failure mix got worse when machine load was high (15-min load avg ~5.9 after back-to-back runs + a crashed process); after the load settled the same checks recovered. Re-run before diagnosing; check `uptime` if a run looks unusually flaky.
+- This session hit one harness crash mid-run (external); the dev server + `node --check` workflow recovered cleanly — re-run from scratch, never resume a partial suite.
+
+### Deferred deliberately
+
+- Perception, hearing, fear, flee/investigate, explosion damage to NPCs — Phase 13 (the plan splits §110/§111; the bus already carries every event needed).
+- Inventory — no item system exists to put in it; health is wired (field + clamp) with no damage source yet.
+- Hunger consequences — no food/economy exists (Phase 14+ utilities/props).
+- NPC wading/swimming — nav marks water not-open; lakes are walls (known-issues).
+- Real day/night clock — the tick counter is a placeholder until Phase 15/16 atmosphere provides the cycle.
+- Figure-figure/player collision, animation, 200-NPC stress — population 16 with overlap is believable now; revisit at the Phase 25+ benchmarks.
+
+### Tests
+
+- Unit tests: 309 passed (25 files; +31 NPC/navigation)
+- Integration: headless browser suite incl. 10-check Phase 12 NPC scenario (all green, twice); documented Phase 7/8/10 input-race flakes remain harness-side; manual GUI pass pending (user)
+- Typecheck: clean (strict) · Lint: clean · Prettier: clean
+
+### Benchmarks
+
+- NPC: GATE re-path ~1 ms (0.7–1.1 across runs), sealed-goal flood ≈ 5 ms, anchor scan ≈ 6 µs, GATE 16-NPC tick 0.03 ms mean — `docs/performance.md`
+- FPS: unchanged at idle (the sim's per-tick work is noise-level; costs are A\*-dominated and budgeted)
+
+### Architecture changes
+
+- New dirs: `src/npc/` (pure — extends the ADR-002 pure rule to the NPC sim), `src/render/npcViz.ts` (pool).
+- `World.onVoxelChanged` gains a fourth chained consumer (npc, read-only). No signature changes.
+- No save-format changes (NPCs transient by design). No new materials. No new events yet (Phase 13 will consume the existing ones).
+
+### Known issues
+
+- `docs/known-issues.md`: new "NPCs (Phase 12)" section (no perception/reactions yet, grid-following movement, placeholder clock, half-wired needs, transient population, no figure-figure collision, water avoidance, sealed-in idling).
+
+### Next task
+
+- Task: Phase 13 — NPC Reactions (perception, fear, event responses)
+
+### Recommended next steps
+
+1. Perception in `src/npc/` (pure): vision (distance + FOV + DDA line-of-sight — `raycast.ts` is reusable) and hearing (bus events carry position + magnitude; a simple attenuation radius beats propagation for believability).
+2. Reaction states on `NpcState`: `flee` (away from threat, path to a safe anchor or home), `investigate` (path to a heard sound, timeout), `panic` (fast movement + wake from sleep). Wire via `NpcSim.onEvent = (event) => …` like `FireSim`, subscribe in main.
+3. Explosion damage: `explosion` events already carry position/radius — apply health damage by distance inside the sim (respecting walls via a LOS check), despawn on 0 (or a `npc_died` event for Phase 17 audio).
+4. Keep determinism: reactions must hash-based-randomize any choice, and new states need unit tests (flee from explosion, investigate then resume, sleep interrupted by nearby fire).
+
+---
 
 ## Session 007 — 2026-09-10
 
@@ -59,7 +133,7 @@
 - [x] Simplified stress: vertical stack load (1 + everything solid above in the column) vs `strengthOf` (new derived `MATERIAL_STRENGTH` table in materials.ts: wood 22, stone 26, dirt 16, sand 10, grass 14). Stress-eligibility requires a journaled edit (`World.isEdited` — natural terrain is "at rest" and never avalanches); load counts all overlying mass, so wood posts propping terrain still fail believably.
 - [x] `StructuralSim` (ticked like fluid/fire): chains onto `World.onVoxelChanged` — which now also carries the cell's **previous** material — and queues a merged region scan only when solid matter vanished (tool removal, brush delete, cut, explosion, collapse, fire burn-out). Placements and water flow never trigger; building stays Minecraft-free. One analysis per fixed step (`STRUCTURE_ANALYSES_PER_TICK = 1`); pending regions merge with a 32-box fold cap; regions > 150k cells skip (`checked: false`).
 - [x] Regions scan the **full world height** (32 rows) ± 12 horizontally — a cut-off top undercounts column loads (found by a failing test: a ground-level dig next to a 23-tall tower missed the tower top).
-- [x] Collapse flow: the sim *proposes* failing cells via `onCollapse`; main applies them exactly like before — one grouped undoable `collapse` command, debris specs captured pre-edit, dust, `structureCollapsed` event, thud. The applied edits re-queue the region → **progressive cascading collapse** across ticks. `MAX_COLLAPSE_CELLS = 4096` truncates single collapses; the cascade finishes the rest.
+- [x] Collapse flow: the sim _proposes_ failing cells via `onCollapse`; main applies them exactly like before — one grouped undoable `collapse` command, debris specs captured pre-edit, dust, `structureCollapsed` event, thud. The applied edits re-queue the region → **progressive cascading collapse** across ticks. `MAX_COLLAPSE_CELLS = 4096` truncates single collapses; the cascade finishes the rest.
 - [x] Fire → structure coupling (the Phase 10 deferred item) falls out of the hook: burn-out is a real `setVoxel(AIR)` write, so a burned pillar drops its roof — no special-case code.
 - [x] Performance: snapshot iterates chunk-by-chunk (missing chunks = air, journal consulted once per chunk), hot passes read a precomputed `solid` byte buffer (no function calls — vitest's module transform turns imported material constants into namespace lookups; the naive version measured 9.6 ms where the fixed one measures 2.2 ms).
 - [x] `src/render/structureViz.ts` (G toggle): pooled InstancedMesh flashing failed cells ~1.6 s — red = lost support, orange = stress fracture. HUD `· struct qN` while regions pending; `structure`/`structureViz` exposed on `__mw`; `structure.reset()` on load.
@@ -992,23 +1066,23 @@ pickup instructions in `HANDOFF.md`.
 
 ## Core NPC
 
-- [ ] Define NPC entity
-- [ ] Add transform
-- [ ] Add health
-- [ ] Add needs
-- [ ] Add inventory
-- [ ] Add home
-- [ ] Add job
-- [ ] Add schedule
-- [ ] Add state machine / behavior system
+- [x] Define NPC entity _(`NpcState` in src/npc/npc.ts — id, position, yaw, activity/intent, health, needs, home, work, path, waitTicks, falling; Session 008)_
+- [x] Add transform _(float world-space feet position + yaw facing movement; Session 008)_
+- [x] Add health _(field at 100 with clamp; no damage source until Phase 13 wires explosion effects; Session 008)_
+- [x] Add needs _(hunger + sleep accumulate deterministically; sleep gates bedtime behavior; hunger has no consumer until food exists; Session 008)_
+- [ ] Add inventory _(deferred — no item system exists to put in it; revisit with Phase 14+ props/economy)_
+- [x] Add home _(walkable anchor picked deterministically at spawn, 3–7 cells out; sleep destination; Session 008)_
+- [x] Add job _(work anchor 8–16 cells out; work-hour commute destination; Session 008)_
+- [x] Add schedule _(tick-count clock: 100 ticks/hour, day = 2400; night 22–06 sleep, work 09–17, else wander; placeholder for the Phase 15/16 day/night cycle; Session 008)_
+- [x] Add state machine / behavior system _(idle → wander → goto → sleep with intent-driven arrival; decision budget 3 A\* searches/tick; Session 008)_
 
 ## Navigation
 
-- [ ] Define walkable space
-- [ ] Build navigation graph
-- [ ] Implement A*
-- [ ] Implement dynamic obstacle updates
-- [ ] Implement local navigation invalidation
+- [x] Define walkable space _(`terrainNavQuery`: open feet + open headroom + solid floor; water not walkable; Session 008)_
+- [x] Build navigation graph _(implicit grid graph — every standable cell a node, legal steps edges; nothing to rebuild after edits, plan §40; Session 008)_
+- [x] Implement A* _(Manhattan heuristic, binary heap with insertion-order tie-breaks, flat/+1/drop ≤ 3 with lip-clearance rule, 512-expansion budget; Session 008)_
+- [x] Implement dynamic obstacle updates _(paths verify each next cell every tick; a solid write across the path forces a re-path; Session 008)_
+- [x] Implement local navigation invalidation _(sim observes `World.onVoxelChanged`, marks only paths whose cells/floors the edit touched; ≤ 3 decides per fixed step; Session 008)_
 
 ## Perception
 
@@ -1019,20 +1093,22 @@ pickup instructions in `HANDOFF.md`.
 - [ ] Sound propagation
 - [ ] Event detection
 
+_(Perception is Phase 13 (§111); the plan's Phase 12 scope is navigation + idle/wander/schedule. The bus already carries `explosion`/`structureCollapsed`/`fireIgnited`.)_
+
 ## Reactions
 
-- [ ] Wander
-- [ ] Go home
-- [ ] Go to work
+- [x] Wander _(hash-scattered reachable targets within 10 cells, pathed, idle waits between; Session 008)_
+- [x] Go home _(night + exhaustion bedtime → path home → sleep; Session 008)_
+- [x] Go to work _(work-hour commutes, ~60% of decisions, longer stays at the anchor; Session 008)_
 - [ ] Investigate sound
 - [ ] Flee fire
-- [ ] React to collapse
+- [x] React to collapse _(physics-level: support vanishing under a figure → gravity fall → landing re-path; water landing despawns. Fear/investigate reactions are Phase 13; Session 008)_
 - [ ] React to flood
 - [ ] React to power outage
 
 ### Milestone
 
-- [ ] **Milestone 10 complete: NPCs live in and react to the world**
+- [ ] **Milestone 10 complete: NPCs live in and react to the world** _(half met — "live in the world" is done and verified (population, schedules, navigation, collapse falls); event-driven reactions wait for Phase 13 perception)_
 
 ---
 
@@ -1425,7 +1501,7 @@ Only after core deterministic simulation is stable.
 - [x] Large explosion _(100-event explosion stress: pool capped, stable — tests/debrisPool.test.ts, Session 004)_
 - [x] Large flood _(22×22 basin source-flood benchmark: settles in ≈2.7 s inside the budget; 384-cell budget tick 2.6 ms — Session 005)_
 - [x] Large fire _(20×20 wood platform burns out completely in ≈1.0 s of total sim work (~2 ms/tick amortized); full-budget tick 1.68 ms — benchmarks/fire.bench.ts, Session 006)_
-- [ ] Many NPCs
+- [ ] Many NPCs _(16-figure population tick measured at 0.03 ms + 5000-tick invariant fuzz with edits — Session 008; the real 200-NPC stress waits for the town-scale benchmarks)_
 - [ ] Many chunks loading/unloading
 
 ---
@@ -1445,8 +1521,8 @@ Only after core deterministic simulation is stable.
 - [x] Fluids _(architecture "Water (Phase 9)" — sim, hooks, rendering, swim, save v2)_
 - [x] Fire _(architecture "Fire (Phase 10)" — cells/heat model, death rules, ignition paths, budget, rendering, interactions)_
 - [x] Structures _(architecture "Structural simulation (Phase 11)" — graph model, cantilever BFS, stress + journal exemption, ticked sim + budgets, collapse flow, fire coupling, viz)_
-- [ ] NPCs
-- [ ] Navigation
+- [x] NPCs _(architecture "NPCs (Phase 12)" — nav queries, A\* model, schedule/needs, population, determinism, viz)_
+- [x] Navigation _(covered in the same section — implicit grid graph, invalidation, budgets; Session 008)_
 - [ ] World generation
 - [ ] Weather
 - [ ] Audio
