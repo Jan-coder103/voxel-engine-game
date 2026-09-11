@@ -369,6 +369,20 @@ describe('displacement and persistence', () => {
     expect(world.getVoxel(0, 1, 0)).toBe(STONE);
   });
 
+  it('pouring into a chunk whose level map was never created reads back flowing', () => {
+    // Regression (Phase 15): a deleteLevel miss on a map-less chunk left
+    // a dangling (key, undefined) memo, so the FIRST mapForWrite for that
+    // chunk skipped the memo refresh and every later read saw a phantom
+    // source (255) instead of the written flowing level.
+    const world = new World(() => {});
+    world.ensureChunk(0, 0, 0);
+    const fluid = new FluidSim(world);
+    world.setVoxel(2, 1, 2, STONE); // non-water write → deleteLevel miss: no entry, no map
+    expect(fluid.pour(3, 1, 3, 12)).toBe(true);
+    expect(fluid.levelAt(3, 1, 3)).toBe(12);
+    expect(fluid.isSource(3, 1, 3)).toBe(false);
+  });
+
   it('level state round-trips through export/load', () => {
     const world = basinWorld();
     const fluid = new FluidSim(world);

@@ -493,6 +493,62 @@ already how player changes persist.
   terrain (`benchmarks/town.bench.ts`); the one-time boot census is a
   couple of milliseconds.
 
+## Utilities (Phase 15)
+
+Phase 15 wires the town: a power grid and a water main, both simulated
+by small component-rebuilding sims that follow the structural pattern —
+world writes touching their materials queue a cell, each tick rebuilds
+at most one connected component (BFS with a hard cell cap), and chunk
+generation scans queue silently (discovering existing state is not a
+state change, so only edit-triggered rebuilds emit events). All state
+is transient and derived from voxels; the save format is untouched.
+
+- **Power grid** (`src/voxel/power.ts`): the network is the connected
+  component of copper / lamp / generator cells. A component with ≥ 1
+  intact generator is powered; when its lamps exceed the supply
+  (`capacityPerGenerator`, tests override the 1024 default), lamps are
+  lit in BFS order from the generators so an overloaded grid browns out
+  the farthest first. No voltage, current, or resistance — believable
+  over accurate (plan §47 simplified). Every lamp flip emits
+  `powerLost` / `powerRestored` (the Phase 13 NPC wiring consumes the
+  former: nearby figures glance over).
+- **Plumbing** (`src/voxel/plumbing.ts`): the network is the connected
+  component of pipe / pump / tap cells. A pump is self-powered (diesel,
+  no generator coupling yet) and pressurizes its component when water
+  touches any face. While pressurized: a **leak** (any pipe cell
+  destroyed by tool, explosion, collapse, or dig) re-fills its hole
+  with flowing water through `FluidSim.pour` every `POUR_PERIOD` ticks
+  until the network runs dry — real Phase 9 water that spreads, puts
+  out fires, and sweeps NPCs; a pressurized **tap** pours into the
+  first air cell beside it. Destroy the pump and leaks stop, taps dry.
+- **Generated utilities** (`src/worldgen/utilities.ts`, pure like the
+  town): a copper **cable** is buried one block under every road-line
+  center column (with stair-step fills where the terrain rises — the
+  higher column extends down to its neighbor's level, keeping the grid
+  connected and every cell grounded); metal **lampposts** rise from the
+  cable every 8th center column (seeded offset); one **generator** on a
+  copper vault at the central intersection feeds the whole grid (on
+  watery seeds the plant stands on the bridge deck). The **water main**
+  runs down the road's edge lane at h−2 (h−3 under cable crossings so
+  the cable keeps its support, deck−1 under water on posts) from a
+  submerged **pump** at the nearest lake to a **tap** on a standpipe by
+  the town center. All hashes — no sequential RNG.
+- **Mesh redundancy**: the town grid is a 9×9 mesh, so a single cable
+  cut is _tolerated_ (nothing disconnects — realistic); blackouts
+  require orphaning the plant or cutting a full line. Severing a pipe
+  or a wire splits the network into independent components, each
+  rebuilt separately — the severed far side genuinely goes dark/dry.
+- **Rendering** (`src/render/powerViz.ts`): one pooled InstancedMesh of
+  warm translucent shells over lit lamps, rebuilt only when the sim's
+  `revision` changes. The lamp voxel itself is a dim housing; there are
+  no dynamic lights yet (Phase 17).
+- **Performance**: `makeCachedReader` (`src/voxel/cachedReader.ts`) gives
+  rebuild BFS a real chunk cache — the World's one-slot memo thrashes
+  under the flood's access pattern (~0.9 µs/read on the dev VM). A
+  full town-grid rebuild (~5.4k cells) costs ~12 ms there; rebuilds run
+  only when utility cells actually change, budgeted one per tick.
+  `FluidSim.pour` reuses the Phase 9 write path (journaled, remeshed).
+
 ## Chunk meshing and streaming
 
 - Production meshing is `meshVolumeGreedy`: the 0fps per-axis sweep —
@@ -605,7 +661,13 @@ depth write so lake beds stay visible.
   determinism, fire→collapse coupling, edit-journal contract), fire
   (ignition rules, spread, exact burn durations, water coupling,
   smothering, blast heat, budget, sleep/wake, determinism, journal
-  interplay).
+  interplay), town (plan/lot round-trips, determinism, building
+  invariants, bridges, trees, anchors, materials), navigation + NPC +
+  reactions, utilities (grid light/cut/mend, brownout order,
+  independent networks, silent discovery, rescan; pressurized mains,
+  leaks, taps, severed-side isolation, pour rules), and town utilities
+  (every generated lamp lit on two seeds, plant anatomy, pole anatomy,
+  continuous pressurized main, burst-and-rip end-to-end).
 - Benchmarks: `benchmarks/mesher.bench.ts` (naive vs greedy, solid/
   checker/layered/terrain), `benchmarks/storage.bench.ts` (dense vs
   packed), `benchmarks/terrain.bench.ts`, `benchmarks/destruction.bench.ts`
@@ -613,7 +675,10 @@ depth write so lake beds stay visible.
   tick, flood scenarios), `benchmarks/fire.bench.ts` (budget tick, fire
   front, full burn-out scenario), `benchmarks/structure.bench.ts`
   (house-scale gate, worst-case solid region, overstress tower, full
-  collapse cascade). Baselines in `docs/performance.md`.
+  collapse cascade), `benchmarks/town.bench.ts` (generation overlay,
+  plan, census), `benchmarks/npc.bench.ts` (re-path, population tick),
+  `benchmarks/utilities.bench.ts` (grid rebuild gate, main rebuild,
+  pour cadence, route scan). Baselines in `docs/performance.md`.
 - Headless GUI verification: `.verify/run.mjs` (local, gitignored)
   drives the real game in Playwright Chromium through the dev-only
   `__mw` hook — pointer lock, brush strokes, selection/clipboard/

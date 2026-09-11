@@ -252,6 +252,46 @@ milestone goes here before it goes to the backlog.
   path around them, a player can fall through them (believable, not
   guarded).
 
+## Utilities (Phase 15)
+
+- **No voltage, current, or resistance.** The power model is component
+  membership + aggregate supply/demand: a generator lights up to
+  `capacityPerGenerator` (1024) consumers, overload browns out lamps
+  farthest from the plant in BFS order. No transformers, switches,
+  batteries, or wire loss (plan §47 items deferred until a reason
+  exists — there is no economy or machine set to feed).
+- **Generators need no fuel and never wear out.** One intact block
+  pair powers the whole town indefinitely; no economy exists to buy
+  fuel for. Destroying both blocks orphans the grid instantly.
+- **Pumps are self-powered.** A diesel pump by the lake pressurizes
+  its whole pipe network with no wire in sight — the power→plumbing
+  coupling (pump stalls in a blackout) is an obvious next step but
+  kept out of this phase to keep the two systems independently
+  testable.
+- **Lamps don't illuminate anything.** Lit lamps get a warm glow shell
+  (`powerViz`); the voxel shader has no point lights, so a lit street
+  is no brighter than a dark one at night. Real lamp lighting needs the
+  Phase 17 lighting pass (or a voxel light field, Phase 16+).
+- **Leaks are refills, not jets.** A broken main re-fills its hole
+  every `POUR_PERIOD` ticks with a small flowing level — the hole
+  puddles rather than spraying, and a pipe broken while underwater or
+  buried in solid ground stays dry until exposed. No pressure drop,
+  flow rate, valves, drains, or sewer network (plan §48/§22 deferred;
+  the §22 room-flooding chain works through the plain fluid sim).
+- **The town grid is mesh-redundant.** Every road line crosses every
+  other, so a single cable cut disconnects nothing — blackouts need a
+  severed plant or a full line. Believable (real street grids have
+  redundancy) but it means the "one shovel strike → dark street"
+  fantasy needs the plant or a trench.
+- **Utility states are transient.** The lit set and pressurized/leak
+  sets rebuild from voxels on load (chunk scans + `rescan`); the save
+  stores the blocks and the poured water (journaled), not the network
+  state. A save mid-leak resumes leaking after the load.
+- **Lampposts and standpipes are obstacles.** Poles occupy the road
+  center column (NPCs path around; the two side lanes stay open) and
+  the water main's riser blocks one lane cell. A pole cut at its base
+  topples into the structural sim like any unsupported column.
+
 ## GUI verification (headless)
 
 - **Automated browser runs have input races.** Under SwiftShader

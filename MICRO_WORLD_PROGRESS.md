@@ -31,23 +31,100 @@
 
 ## Overall Phase
 
-**Current phase:** Phase 14 (Procedural Town) — **complete and committed** (implementation, verification, docs). Milestone 11 met: the world now contains a **procedural explorable town**. Next: Phase 15 (Utilities — electricity, plumbing) per the plan (§113).
+**Current phase:** Phase 15 (Utilities) — **complete and committed** (implementation, verification, docs). Milestone 12 met: the town has **working power and water** — a buried grid lights every street lamp, and a water main feeds a real fountain; both fail believably (orphan the plant → blackout; burst the main → flood; destroy the pump → everything dries up). Next: Phase 16 (Weather/Atmosphere) per the plan (§114), or Phase 17 (Visual Polish) if atmosphere stays cut.
 
-**Current milestone:** Milestones 1–11 met. Phase 14 lays a seeded town over the terrain generator: roads on a 24-cell grid with wooden bridges over water, blocks and 10×10 lots, parameterized buildings (wood houses — some two-story with walkable interior stairs, brick shops, concrete industrial), glass windows, doors, hash-placed furniture, wild trees, and door-front anchors that the NPC population uses as homes and workplaces.
+**Current milestone:** Milestones 1–12 met. Phase 15 adds two component-rebuilding sims (power, plumbing) on the structure.ts pattern, six appended materials (copper, lamp, generator, pipe, pump, tap), generated utilities in the town (buried cable under every road-line center column, lampposts every 8th center column, a generator at the central intersection, a water main from a lakeside pump to a standpipe tap), `powerLost`/`powerRestored` bus events with the Phase 13 NPC outage reaction, and a lit-lamp glow overlay.
 
-**Overall completion:** ~62% (Phases 0–14 done; deferred: NPC inventory, hunger consequences, NPC wading/swimming, real day/night clock (Phase 16), fire persistence in saves, volumetric smoke, Phase 11 deferrals (lateral load, rigid bodies, wind/rain coupling), fear herding/personality, glass transparency, traffic graph, town utility hooks (Phase 15))
+**Overall completion:** ~66% (Phases 0–15 done; deferred: NPC inventory, hunger consequences, NPC wading/swimming, real day/night clock (Phase 16), fire persistence in saves, volumetric smoke, Phase 11 deferrals (lateral load, rigid bodies, wind/rain coupling), fear herding/personality, glass transparency, traffic graph, voltage/current model + switches/valves/drains/sewer (documented in known-issues "Utilities"), pump power coupling, lamp light contribution)
 
-**Last completed task:** Session 010 (2026-09-11) — implemented Phase 14: pure town module (`src/worldgen/town.ts`: `planAt` road/lot/wild classification, `lotSpec`/`BuildingSpec` parameterized generators, `applyTown` chunk overlay, bridges, trees, `townAnchors`, `townStats`, `findTownSpawn`); five appended materials (asphalt, concrete, brick, glass, leaves) with derived-table entries — save formats untouched (append-only registry); NPC sim accepts injected home/work anchors + a `groundY` spawn-safety predicate (doors become homes, roofs/canopies/decks rejected as spawn points); spawn moved off building pads via `findTownSpawn`; town chunk overlay 0.92 ms mean; 17 tests (347 total); headless Phase 14 section green; docs updated.
+**Last completed task:** Session 011 (2026-09-11) — implemented Phase 15: pure power sim (`src/voxel/power.ts`: component rebuilds with per-side independence, supply/demand brownout in BFS order from generators, silent discovery scans, `rescan`), pure plumbing sim (`src/voxel/plumbing.ts`: pressurized components, leak refill pours + tap fountains through `FluidSim.pour`, pump-destroyed dry-up); generated utilities (`src/worldgen/utilities.ts` + hooks in `applyTown`); six appended materials (ids 12–17) — save format untouched; `cachedReader` for flood-scale reads; 32 tests (379 total); headless Phase 15 section 8/8 green twice; full-town grid rebuild ~12 ms on the dev VM.
 
 **Current task:** None — session complete, work committed.
 
 **Blocked by:** Nothing.
 
-**Next recommended action:** **Phase 15 (Utilities)** per the plan (§113): a power graph (generator → wire → lamp/consumer) hung off the existing event bus — `POWER_LOST` gets the NPC reaction the Phase 13 wiring already anticipates — then plumbing ("pipe breaks → water leaks" is the believable core; the flooding integration test is the pay-off). The town's buildings, lamps, and NPC schedules are the natural consumers.
+**Next recommended action:** **Phase 16 (Weather/Atmosphere)** per the plan (§114): the day/night cycle is the highest-value item — the NPC schedule already runs a placeholder tick clock, lamps exist to matter at night, and weather hooks (rain → fire coupling, storm → the Phase 18 scenario seeds) are the natural follow-on. Fog/sky/stars first, then rain. Alternatively Phase 17 visual polish if the lighting debt (lamps that don't illuminate) bothers the demo first.
 
 ---
 
 # Session Log
+
+## Session 011 — 2026-09-11
+
+**Status:** Complete — Phase 15 (Utilities) done, verified, documented, committed. Milestone 12 met.
+
+### Completed
+
+- [x] Pure power sim (`src/voxel/power.ts`, ADR-002/005): the grid is the connected component of copper / lamp / generator cells, discovered by budgeted BFS rebuilds queued from the World change hook (structure.ts pattern; chunk-ready scans queue silently — discovering state emits nothing). A component with ≥ 1 generator is powered; overload browns lamps out farthest-from-the-plant in deterministic BFS order (`capacityPerGenerator`, default 1024, test-overridable). Under capacity the supply walk is skipped entirely (common case). Lamp flips emit `powerLost`/`powerRestored` on edit-triggered rebuilds only; a cut wire rebuilds **both sides independently** so the severed far side genuinely goes dark.
+- [x] Pure plumbing sim (`src/voxel/plumbing.ts`): components of pipe / pump / tap cells; a water-fed (self-powered diesel) pump pressurizes its component. While pressurized: a destroyed pipe registers a **leak** that re-fills its hole with flowing water via `FluidSim.pour` every `POUR_PERIOD` ticks (pruned when dry or unpressurized), and pressurized **taps** pour into the first air cell beside them. Destroy the pump → leaks stop, taps run dry. Same per-side independent rebuilds as power.
+- [x] `FluidSim.pour(x, y, z, level)` — public flowing-water placement through the normal write path (journaled, remeshed, fire/fluid/NPC-visible).
+- [x] **Generated utilities** (`src/worldgen/utilities.ts`, pure; hooks in `applyTown`): buried copper **cable** under every road-line center column with terrain stair-step fills (higher column extends down to the neighbor's level — connectivity + every cell grounded, so the structural sim never topples the grid); metal **lampposts** (copper pole + lamp head) every 8th center column with a seeded offset; one **generator** on a copper vault at the central intersection (deck-mounted when that crossing is water); a water **main** down the road's edge lane at h−2 (h−3 under cable crossings, deck−1 under water on parity posts) from a submerged **pump** (water neighbor required on the off-road side) to a standpipe + **tap** near the center. `pipelineRoute` is a pure early-exit scan; chunks gate it to their lane row.
+- [x] Materials (append-only, ids 12–17: copper, lamp, generator, pipe, pump, tap) with hardness/strength entries; all fireproof. Legacy 7-material snapshots still validate — no format bump.
+- [x] Wiring (main.ts): sims constructed before chunk generation (hooks), `power.tick`/`plumbing.tick` in the fixed step after structure, `powerLost` → `npc.notify` (Phase 13 anticipated case: nearby figures +6 fear and investigate), power events → bus, HUD `· lamps N` / `· leaks N`, L-key load resets + rescans both sims, `__mw.power`/`plumbing`/`powerViz`/`utilities` (generator site + route) debug hooks.
+- [x] Rendering (`src/render/powerViz.ts`): pooled InstancedMesh of warm glow shells over lit lamps, rebuilt only when the sim's `revision` changes.
+- [x] Tests: `tests/power.test.ts` (12), `tests/plumbing.test.ts` (8), `tests/townUtilities.test.ts` (8), NPC outage reaction (3 in npcReactions.test.ts), fluid memo regression (1) — 32 new, **379 total** (30 files).
+- [x] Benchmarks (`benchmarks/utilities.bench.ts`): GATE full town-grid rebuild (~5.4k cells) **≈ 12 ms** per rebuild on the dev VM (cut+mend pair per iteration), main rebuild ≈ 0.17 ms, pour pass ≈ 0.002 ms, route scan 0.08 ms, applyTown-with-utilities 1.3 ms/chunk. Baselines in `docs/performance.md`.
+- [x] Headless browser verification (`.verify/run.mjs`): new Phase 15 section (8 checks on `?seed=24680`) — 382 lamps generated and lit, plant destruction blacks the town out with powerLost events, plant rebuild relights with powerRestored, pump+pressurized tap found via the route hook, the fountain pours, a burst main floods its hole (leak registered), destroying the pump stops the leak, and a figure investigates an outage. **All 8 green in two consecutive runs**, zero page errors. Residual failures elsewhere are the documented Phase 7–13 synthetic-input races (box at load 5–7 across runs).
+- [x] Docs: architecture "Utilities (Phase 15)" + test/benchmark lists, performance utilities baselines, known-issues new "Utilities (Phase 15)" section (8 entries), README (state 0–15, quickstart utilities paragraph, hotbar note, layout), CHANGELOG `[0.13.0]`, this file.
+
+### Fixed during verification
+
+- **Cable connectivity (generation): three compounding bugs, each found by a generated-world probe.** (1) The cable had no stair-step fills — terrain steps > 1 shattered the grid into 108 line-islands and almost nothing lit; fills were added (higher column extends down to its neighbor's level, staying buried). (2) `cableAt` used a "column offset" helper that returned the _lane_ offset for a column that sits on a vertical road's lane AND a horizontal line's _center_ — the horizontal lines had 2-cell gaps at every crossing; fixed to the direct `ux === 0 || uz === 0`. (3) Fills ran only on dry columns, but a submerged column can be the higher one at a shoreline (its cable sits at deck−1) — fills moved to both branches. After all three: exactly one component of 5396 cells and every generated lamp lit on four probed seeds.
+- **Plumbing severed-side bug (real sim bug):** a broken pipe seeded the rebuild from _both_ sides of the gap, and the flood treated the two disconnected halves as one component — the severed far side stayed "pressurized" (taps kept flowing, leaks kept feeding). Fix: per-side component rebuilds; added the severed-side unit test.
+- **Power had the same severed-side class:** a cut wire's two sides were diffed as one component, so the lamp beyond a cut stayed lit. Same per-side restructure; the cut/mend unit test pins it.
+- **Fluid level memo dangled (Phase 9 latent bug):** a `deleteLevel` miss on a map-less chunk left a stale `(key, undefined)` memo; the first later `mapForWrite` for that chunk skipped the refresh and every read returned a phantom source (255). Found by the pour path; `deleteLevel` now clears the memo; regression-tested.
+- **GATE benchmark started at ~56 ms per flip** (frame-budget territory): profiled to the rebuild BFS — the World's one-slot chunk memo thrashes under flood locality (~0.9 µs/read) and the supply walk ran even when under capacity. Fixes: `makeCachedReader` (per-rebuild chunk cache), packed-key frontier (no per-neighbor allocations), supply walk only when overloaded, one rebuild seed per chunk scan, head-indexed queue. Result ≈ 12 ms/rebuild; documented with the VM caveat.
+
+### Verification lessons (for future sessions)
+
+- **A periodic-lattice failure can have three stacked causes** — a missing feature (fills), a lattice-arithmetic bug (lane-vs-center), and a parity/branch bug (dry-only fills) — and fixing one just changes the failure shape. Probe at the _component_ level (flood-fill the grid and count components) instead of eyeballing cells; the component census said "108 islands, each one line" in one shot.
+- **Mesh-redundant networks defeat single-cut fixtures.** The town grid is 9×9 lines: cutting one cable cell disconnects nothing (correct, realistic!). The harness now demos the plant (two blocks) instead. When a check fails because the world is _better_ than expected, verify the invariant holds and re-aim the fixture.
+- **Structurally-unsound fixtures get eaten by other sims before yours runs.** Cutting a lamppost's pole makes the pole+lamp unsupported — the structural sim (ticking _before_ power) collapses it, and the power check tests rubble. Cut the cable, not the pole.
+- This VM costs ~0.4–0.9 µs per Map/Set/closure op; component-scale algorithms need read caches and skip-paths designed in, not micro-tuned later (same lesson as Session 007's flat-array snapshot, applied to graphs).
+
+### Deferred deliberately
+
+- Voltage/current/resistance, transformers, switches, batteries — the aggregate supply/demand model is all the plan §47 the current game can express (known-issues).
+- Generator fuel/economy; pump power coupling (pumps are self-powered diesel for now).
+- Lamps illuminating surroundings (needs Phase 17 lighting or a voxel light field); power→NPC schedule coupling (workplaces needing power).
+- Valves, drains, sewer network, pressure-driven jets, per-fixture flow rates (plan §48/§22 remainder) — leaks-and-taps is the believable core.
+- Fire burns cables/pipes? They are fireproof by table (machines don't burn); deliberate until a failure-model pass.
+- The §22 pipe→floor→room integration test exists in miniature (unit burst test + harness lane flood); the full multi-room chain awaits a basement-generating town.
+
+### Tests
+
+- Unit tests: 379 passed (30 files; +32 utilities)
+- Integration: headless browser suite incl. the 8-check Phase 15 section (green twice); documented Phase 7–13 synthetic-input races remain harness-side; manual GUI pass pending (user)
+- Typecheck: clean (strict) · Lint: clean · Prettier: clean · Build: succeeds (three.js chunk unchanged)
+
+### Benchmarks
+
+- Utilities: GATE town-grid rebuild ≈ 12 ms/rebuild (~5.4k cells, this VM); main rebuild 0.17 ms; pour pass 0.002 ms; route scan 0.08 ms; applyTown-with-utilities 1.3 ms/chunk (was 0.92) — `docs/performance.md`
+- FPS: unchanged at idle (both sims early-exit on empty queues)
+
+### Architecture changes
+
+- New: `src/voxel/power.ts`, `src/voxel/plumbing.ts`, `src/voxel/cachedReader.ts` (pure), `src/worldgen/utilities.ts` (pure), `src/render/powerViz.ts` (pools).
+- Materials registry: +6 appended ids (12–17) + derived-table entries; `MATERIAL_FORMAT_VERSION` unchanged.
+- `GameEvent` union gains `powerLost`/`powerRestored`; `FluidSim` gains public `pour`; `NpcSim.notify` handles `powerLost`.
+- `applyTown` paints road utilities per road column and the pipeline on lane-row chunks; `roadOffset` exported.
+- Sims chain `onChunkReady` after FluidSim (scan new chunks for their cells); loads call `reset()` + `rescan()`.
+
+### Known issues
+
+- `docs/known-issues.md`: new "Utilities (Phase 15)" section — no voltage/current model, unfueled generators, self-powered pumps, glow-only lamps, refill-not-jet leaks, mesh redundancy (single cuts tolerated), transient network states, pole/riser obstacles.
+
+### Next task
+
+- Task: Phase 16 — Weather/Atmosphere (day/night cycle, sky, rain; plan §114)
+
+### Recommended next steps
+
+1. Day/night cycle in a pure module (time-of-day → sun direction/sky/fog colors): the NPC schedule's tick clock becomes the world clock; lamp glow finally matters at night. A voxel light field (sunlight + lamp sources, BFS like the fluid) is the bigger win but belongs with Phase 17 lighting.
+2. Weather states with transitions (plan §52): clear → overcast → rain → storm as a seeded state machine; rain couples to fire (extinguish) and later to the fluid sim (accumulation) — the Phase 10/13 deferred hooks.
+3. Keep determinism: weather state must derive from (seed, tick) or a logged transition chain; benchmark the per-frame sky/light updates.
+
+---
 
 ## Session 010 — 2026-09-11
 
@@ -78,7 +155,7 @@
 ### Verification lessons (for future sessions)
 
 - Periodic-feature parity (see the bridge post lattice above) — verify a harness sampling grid against the period of the thing it samples.
-- When a fixture needs *a* instance (figure near a house), create it through the sim's own API (`npc.spawn`) instead of hoping migration delivers one — deterministic and instant.
+- When a fixture needs _a_ instance (figure near a house), create it through the sim's own API (`npc.spawn`) instead of hoping migration delivers one — deterministic and instant.
 - Fractional world coordinates must never reach `world.getVoxel` from harness helpers — round at the helper's door (in-bounds fractions read the wrong cell silently).
 - I ran unit tests + probe scripts during harness runs twice this session; the second full run's failure mix jumped (15 → 20) with load 5+ and recovered on an idle re-run. The idle-machine rule is absolute: one job at a time.
 
@@ -1253,7 +1330,7 @@ _(Perception landed as Phase 13 (§111); the plan's Phase 12 scope was navigatio
 - [x] Flee fire _(fireIgnited sites remembered and seen by vision scans; close figures flee, sleepers wake; fear keeps them running while the threat stays near; Session 009)_
 - [x] React to collapse _(physics-level: support vanishing → gravity fall → landing re-path — Session 008; event-level: near collapses panic, distant ones draw investigators — Session 009)_
 - [x] React to flood _(staggered scans feel water at the feet or 4 neighbors → +60 fear → flight; no bus event needed; Session 009)_
-- [ ] React to power outage _(no power system until Phase 15; the bus/event pattern is ready for it)_
+- [x] React to power outage _(Session 011: `powerLost` within 10 cells → +6 fear and investigate; sleepers and fleeing figures unaffected)_
 - [x] Explosion damage _(distance falloff, lethal in the crater's inner half, quarter behind LOS-blocking walls; death emits `npcDied`; Session 009)_
 
 ### Milestone
@@ -1274,7 +1351,7 @@ _(Perception landed as Phase 13 (§111); the plan's Phase 12 scope was navigatio
 - [x] Industrial building generator _(concrete, slab roof, crates)_
 - [x] Interior generator _(wood/concrete floors, cut/fill pads, upstairs interiors — sparse by design)_
 - [x] Furniture placement _(block-scale beds, tables, counters, crates, hash-placed deterministically)_
-- [ ] Utility generation _(deferred to Phase 15 utilities — lamps/pipes need the power/plumbing systems to mean anything)_
+- [x] Utility generation _(Session 011: buried cable, lampposts, central generator, water main + tap — see `src/worldgen/utilities.ts`)_
 - [x] NPC home assignment _(house door-front cells injected as `NpcSim` home anchors; figures hash-pick among the six nearest)_
 - [x] Job assignment _(shop/industrial doors as work anchors; terrain-ring fallback for wilderness spawns)_
 - [x] Procedural vegetation _(lattice-gated wild trees, canopy fills air only; yard trees on park lots; flammable `leaves`)_
@@ -1290,30 +1367,30 @@ _(Perception landed as Phase 13 (§111); the plan's Phase 12 scope was navigatio
 
 ## Electricity
 
-- [ ] Define power graph
-- [ ] Add generators
-- [ ] Add wires
-- [ ] Add switches
-- [ ] Add lamps
-- [ ] Add consumers
-- [ ] Track voltage/current/power
-- [ ] Handle broken wires
-- [ ] Trigger power outage events
+- [x] Define power graph _(connected components of copper/lamp/generator cells, rebuilt locally on the world hook — Session 011)_
+- [x] Add generators _(one block pair on the town's central intersection; supply = capacity per generator)_
+- [x] Add wires _(buried copper cable under road-line center columns with terrain stair fills; lampposts double as poles)_
+- [ ] Add switches _(deferred — no interaction surface for toggles yet; known-issues "Utilities")_
+- [x] Add lamps _(lamp heads on generated lampposts; warm glow shell when lit)_
+- [x] Add consumers _(lamps; overload browns out farthest-first in BFS order from the generators)_
+- [ ] Track voltage/current/power _(deferred — aggregate supply/demand only; believable over accurate)_
+- [x] Handle broken wires _(cuts split the network into independent components rebuilt per side — the severed far side goes dark; single cuts are tolerated by the mesh, documented)_
+- [x] Trigger power outage events _(`powerLost`/`powerRestored` per lamp flip on the bus; NPC investigate reaction wired)_
 
 ## Plumbing
 
-- [ ] Define pipe graph
-- [ ] Add water sources
-- [ ] Add valves
-- [ ] Add pumps
-- [ ] Add fixtures
-- [ ] Add leaks
-- [ ] Add drains
-- [ ] Add sewer network
+- [x] Define pipe graph _(connected components of pipe/pump/tap cells, per-side rebuilds)_
+- [x] Add water sources _(submerged pumps pressurize their component when water touches any face)_
+- [ ] Add valves _(deferred — no interaction surface; known-issues)_
+- [x] Add pumps _(self-powered diesel for now; power coupling deferred)_
+- [x] Add fixtures _(pressurized taps pour into the first air cell beside them)_
+- [x] Add leaks _(a destroyed pipe re-fills its hole with flowing Phase 9 water every `POUR_PERIOD` while pressurized; pruned when dry)_
+- [ ] Add drains _(deferred — water flows over terrain; no drainage network)_
+- [ ] Add sewer network _(deferred — plan §48 remainder)_
 
 ### Milestone
 
-- [ ] **Milestone 12 complete: Basic utility networks work**
+- [x] **Milestone 12 complete: Basic utility networks work** _(met — the generated town's grid lights every lamp (blackout/plant-restore verified headless) and the water main runs a real fountain; bursts flood and pump loss dries the network; documented limitations in `docs/known-issues.md` "Utilities (Phase 15)")_
 
 ---
 

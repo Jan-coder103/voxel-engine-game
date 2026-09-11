@@ -224,6 +224,36 @@ sealed-goal bench calls `findPath` at its default 2048-expansion budget
 (≈ 20 ms); the sim's decide budget of 512 caps at ≈ 5 ms. Note the VM
 caveat below: numbers are comparable between idle runs only.
 
+## Baselines — utilities (`benchmarks/utilities.bench.ts`)
+
+2026-09-11, same machine. The world is the seeded 1337 town
+(±96 columns materialized). Each GATE iteration is a cut + mend pair —
+two identical component rebuilds — so per-rebuild cost is half the
+iteration mean. Rebuilds run only when a utility cell actually changes,
+budgeted one per tick (like the structural sim).
+
+| Scene                                                          | ≈ time/op                             |
+| -------------------------------------------------------------- | ------------------------------------- |
+| GATE — full town-grid rebuild after a cable flip (~5.4k cells) | ≈ 12 ms per rebuild (mean 25 ms/pair) |
+| main rebuild after a pipe flip (~100 cells)                    | ≈ 0.17 ms per rebuild                 |
+| pour pass (leaks + pressurized tap → `FluidSim.pour`)          | ≈ 0.002 ms per pass                   |
+| chunk scan + settle on a fresh town chunk                      | 0.85 ms (generation-dominated)        |
+| `pipelineRoute` scan (pure, per lane chunk, early exit)        | 0.08 ms                               |
+| `applyTown` with utilities: town-center chunk                  | 1.3 ms (town 0.92 + utilities ~0.4)   |
+
+Reading: the grid rebuild is the one number worth watching. It is
+dominated by ~33k component-BFS reads; `makeCachedReader` (a real chunk
+cache — the World's one-slot memo thrashes under the flood pattern)
+and skipping the supply walk when the component is under capacity took
+it from ~30 ms to ~12 ms on this VM. It fires only on utility-cell
+edits (user-paced) and once per chunk arrival during boot streaming
+(one seed queued per chunk scan; the rebuild consumes the batch), so
+steady-state idle cost is zero — the tick early-exits on an empty
+queue. The plumbing side is noise: the town main is ~100 cells, and a
+pour pass is a handful of `pour` calls. VM caveat applies — treat the
+absolute ms as machine-relative; the ratios and budget behavior are
+the durable facts.
+
 ## Runtime (dev session, Phase 5–8 demo)
 
 - 60 fps (vsync-capped) in the in-app browser at 1280×720 with render

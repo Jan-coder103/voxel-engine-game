@@ -37,6 +37,15 @@ export const CONCRETE: VoxelMaterialID = 8;
 export const BRICK: VoxelMaterialID = 9;
 export const GLASS: VoxelMaterialID = 10;
 export const LEAVES: VoxelMaterialID = 11;
+// Utility materials (Phase 15). Same append-only contract: the power grid
+// (copper, lamp, generator) and the water main (pipe, pump, tap) identify
+// themselves by material so the sims can find their networks.
+export const COPPER: VoxelMaterialID = 12;
+export const LAMP: VoxelMaterialID = 13;
+export const GENERATOR: VoxelMaterialID = 14;
+export const PIPE: VoxelMaterialID = 15;
+export const PUMP: VoxelMaterialID = 16;
+export const TAP: VoxelMaterialID = 17;
 
 const defs: readonly MaterialDef[] = [
   { id: AIR, name: 'air', color: 0x000000, opaque: false, solid: false },
@@ -52,6 +61,13 @@ const defs: readonly MaterialDef[] = [
   // Glass renders as a solid pale pane (no transmission yet — known-issue).
   { id: GLASS, name: 'glass', color: 0xbfe3ef, opaque: true, solid: true },
   { id: LEAVES, name: 'leaves', color: 0x3f7d33, opaque: true, solid: true },
+  // Utilities (Phase 15). Copper doubles as conduit and lamppost material.
+  { id: COPPER, name: 'copper', color: 0xc47a3d, opaque: true, solid: true },
+  { id: LAMP, name: 'lamp', color: 0x6e6552, opaque: true, solid: true },
+  { id: GENERATOR, name: 'generator', color: 0x4a4f58, opaque: true, solid: true },
+  { id: PIPE, name: 'pipe', color: 0x7d8a94, opaque: true, solid: true },
+  { id: PUMP, name: 'pump', color: 0x8a4a3a, opaque: true, solid: true },
+  { id: TAP, name: 'tap', color: 0xc9a441, opaque: true, solid: true },
 ];
 
 export const MATERIALS: readonly MaterialDef[] = defs;
@@ -96,6 +112,12 @@ const MATERIAL_HARDNESS: Readonly<Record<number, number>> = {
   [BRICK]: 0.65,
   [GLASS]: 0.15,
   [LEAVES]: 0.1,
+  [COPPER]: 0.7,
+  [LAMP]: 0.3,
+  [GENERATOR]: 0.85,
+  [PIPE]: 0.75,
+  [PUMP]: 0.85,
+  [TAP]: 0.5,
 };
 
 export function hardnessOf(id: VoxelMaterialID): number {
@@ -153,6 +175,12 @@ const MATERIAL_STRENGTH: Readonly<Record<number, number>> = {
   [BRICK]: 22,
   [GLASS]: 4,
   [LEAVES]: 6,
+  [COPPER]: 20,
+  [LAMP]: 4,
+  [GENERATOR]: 26,
+  [PIPE]: 24,
+  [PUMP]: 26,
+  [TAP]: 18,
 };
 
 export function strengthOf(id: VoxelMaterialID): number {

@@ -4,6 +4,67 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.13.0] — 2026-09-11 — Phase 15 (Utilities)
+
+### Added
+
+- **Power grid** (`src/voxel/power.ts`, pure): connected components of
+  copper / lamp / generator cells, rebuilt locally on the World change
+  hook (structure.ts pattern — budgeted, one rebuild per tick, hard
+  cell cap). A component with a generator is powered; overload browns
+  lamps out farthest-first in deterministic BFS order. `powerLost` /
+  `powerRestored` events fire per lamp flip on edit-triggered rebuilds
+  (chunk-ready discovery scans apply state silently).
+- **Plumbing** (`src/voxel/plumbing.ts`, pure): connected components of
+  pipe / pump / tap cells. A water-fed pump pressurizes its network;
+  while pressurized, a destroyed pipe cell re-fills with real Phase 9
+  water (`FluidSim.pour`) every `POUR_PERIOD` ticks and pressurized
+  taps pour beside themselves. Severed sides rebuild as independent
+  components — the far side of a cut genuinely goes dry/dark. Pump
+  destroyed → leaks stop, taps dry.
+- **Generated utilities** (`src/worldgen/utilities.ts`, pure): buried
+  copper cable under every road-line center column (with terrain
+  stair-step fills), metal lampposts every 8th center column, one
+  generator on a copper vault at the town's central intersection (on
+  the bridge deck when that crossing is water), and a water main from
+  a submerged pump at the nearest lake to a standpipe tap by the town
+  center (edge lane, diving under cable crossings, posts under water).
+  Six appended materials (12–17: copper, lamp, generator, pipe, pump,
+  tap) with derived-table entries — save format untouched.
+- **NPC outage reaction** (the Phase 13 anticipated case): a lamp
+  dying within 10 cells draws a small fear spike and an investigate.
+- **Lit-lamp glow** (`src/render/powerViz.ts`): pooled InstancedMesh
+  shells over lit lamps, revision-gated (no dynamic lights yet).
+- **Tests**: 32 new (379 total, 30 files) — grid light/cut/mend,
+  brownout order, independent networks, silent discovery, rescan,
+  oversize-component skip, determinism; pressurized mains, taps,
+  burst/rip end-to-end, severed-side isolation, pour rules, plus the
+  fluid-memo regression; generated-town invariants on two seeds
+  (every generated lamp lit incl. a deck-mounted plant, pole/plant
+  anatomy, continuous pressurized main, burst floods / pump stops it).
+- **Benchmarks** (`benchmarks/utilities.bench.ts`): full town-grid
+  rebuild ≈ 12 ms (this VM; cut+mend pair per iteration), main rebuild
+  ≈ 0.17 ms, pour pass ≈ 0.002 ms, route scan 0.08 ms. Baselines in
+  `docs/performance.md`.
+
+### Fixed
+
+- **Fluid level memo could dangle (Phase 9 latent bug)**: a
+  `deleteLevel` miss on a chunk with no level map left a stale
+  (key, undefined) memo, so the first later write into that chunk
+  skipped the memo refresh and every read saw a phantom source (255).
+  Found by the plumbing pour path; regression-tested.
+
+### Changed
+
+- Sims now read through `makeCachedReader` (`src/voxel/cachedReader.ts`)
+  during component floods — the World's one-slot chunk memo thrashes
+  under BFS locality (~0.9 µs/read); the cached reader cut a full
+  town-grid rebuild from ~30 ms to ~12 ms on the dev VM.
+- NPC `notify` accepts `powerLost`; HUD gains `· lamps N` and
+  `· leaks N` lines; `__mw` exposes `power`, `plumbing`, `powerViz`,
+  and `utilities` (generator site + pipeline route).
+
 ## [0.12.0] — 2026-09-11 — Phase 14 (Procedural Town)
 
 ### Added

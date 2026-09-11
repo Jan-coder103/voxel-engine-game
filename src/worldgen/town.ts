@@ -19,6 +19,7 @@ import {
   isDry,
   type TerrainParams,
 } from '../voxel/terrain';
+import { paintPipeline, paintRoadUtilities, pipelineRoute } from './utilities';
 
 /**
  * Procedural town (Phase 14, plan §112): a seeded grid of roads, blocks,
@@ -107,7 +108,8 @@ export interface LotSpec {
 
 const mod = (v: number, m: number): number => ((v % m) + m) % m;
 
-function roadOffset(seed: number, salt: number): number {
+/** Per-seed offset of the road lattice on one axis (exported for utilities). */
+export function roadOffset(seed: number, salt: number): number {
   return 4 + Math.floor(hash3(salt, 977, salt + 1, seed) * 16);
 }
 
@@ -553,6 +555,7 @@ export function applyTown(chunk: Chunk, params: TerrainParams): void {
       const plan = planAt(wx, wz, params);
       if (plan.kind === 'road') {
         paintRoadColumn(wx, wz, params, set);
+        paintRoadUtilities(wx, wz, params, set); // cable, poles, generator
       } else if (plan.kind === 'lot' && plan.lot) {
         const key = `${plan.lot.x},${plan.lot.z}`;
         if (!lots.has(key)) lots.set(key, lotSpec(plan.lot.x, plan.lot.z, params));
@@ -566,6 +569,15 @@ export function applyTown(chunk: Chunk, params: TerrainParams): void {
     for (let tx = origin.x - 2; tx < origin.x + CHUNK_SIZE + 2; tx++) {
       if (isTreeAt(tx, tz, params)) paintTree(tx, tz, params, setSoft, set);
     }
+  }
+
+  // Water main (Phase 15): one route per town; only chunks containing a
+  // candidate lane row pay for the (pure, early-exit) route scan.
+  const offZ = roadOffset(params.seed, 2);
+  const kMin = Math.ceil((origin.z + 1 - offZ) / ROAD_SPACING);
+  if (kMin <= Math.floor((origin.z + CHUNK_SIZE - offZ) / ROAD_SPACING)) {
+    const route = pipelineRoute(params);
+    if (route) paintPipeline(origin.x, origin.x + CHUNK_SIZE - 1, route, params, set);
   }
 }
 

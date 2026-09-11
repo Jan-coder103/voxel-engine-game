@@ -124,6 +124,8 @@ const FEAR_ON_SIGHT: Record<ThreatKind, number> = {
   fire: 25,
   water: 60,
 };
+/** Figures this close (cells) to a lamp dying look over curiously. */
+const POWER_OUTAGE_RADIUS = 10;
 /** Fear decay per tick — panic subsides in seconds of real time. */
 const FEAR_DECAY_AWAKE = 0.1;
 const FEAR_DECAY_ASLEEP = 0.15;
@@ -248,8 +250,11 @@ export class NpcSim {
       case 'fireIgnited':
         this.onFire(event);
         break;
+      case 'powerLost':
+        this.onPowerOutage(event);
+        break;
       default:
-        break; // extinguishing is good news; npcDied is our own output
+        break; // extinguishing/restoring is good news; npcDied is our own output
     }
   }
 
@@ -448,6 +453,21 @@ export class NpcSim {
       npc.fear = Math.min(100, npc.fear + gain * (dist <= 10 ? 1.6 : 0.6));
       if (npc.fear >= PANIC_THRESHOLD) this.startFlee(npc);
       else this.startInvestigate(npc, event.x, event.y, event.z);
+    }
+  }
+
+  /**
+   * A streetlight died nearby: not dangerous, just odd. Close figures
+   * glance over (small fear, investigate if idle); sleepers keep
+   * sleeping — a distant lamp failing is not a lullaby interruptor.
+   */
+  private onPowerOutage(event: Extract<GameEvent, { type: 'powerLost' }>): void {
+    for (const npc of this.npcs) {
+      const d = Math.hypot(npc.position.x - event.x, npc.position.z - event.z);
+      if (d > POWER_OUTAGE_RADIUS) continue;
+      if (npc.activity === 'sleep' || npc.activity === 'flee') continue;
+      npc.fear = Math.min(100, npc.fear + 6);
+      if (npc.fear < PANIC_THRESHOLD) this.startInvestigate(npc, event.x, event.y, event.z);
     }
   }
 

@@ -35,6 +35,7 @@ import {
   TOWN_RADIUS,
   type BuildingSpec,
 } from '../src/worldgen/town';
+import { generatorSite, lampPostAt } from '../src/worldgen/utilities';
 
 const TERRAIN: TerrainParams = { ...DEFAULT_TERRAIN, seed: 1337 };
 /** A seed whose roads cross water inside the town (verified by census). */
@@ -336,11 +337,14 @@ describe('town roads and bridges', () => {
   it('asphalt resurfaces dry road columns', () => {
     const world = townedWorld(TERRAIN);
     materialize(world, -24, 24, -24, 24);
+    const gen = generatorSite(TERRAIN);
     let checked = 0;
     for (let z = -24; z < 24 && checked < 50; z++) {
       for (let x = -24; x < 24 && checked < 50; x++) {
         const h = heightAt(x, z, TERRAIN);
         if (planAt(x, z, TERRAIN).kind === 'road' && isDry(h, TERRAIN)) {
+          // Lamppost bases and the generator vault replace the surface.
+          if (lampPostAt(x, z, TERRAIN) || (x === gen.x && z === gen.z)) continue;
           expect(world.getVoxel(x, h - 1, z)).toBe(ASPHALT);
           checked++;
         }

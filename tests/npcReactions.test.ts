@@ -384,3 +384,47 @@ describe('reactions: determinism + invariants', () => {
     expect(maxSeen).toBeGreaterThan(0);
   });
 });
+
+describe('power outage reaction (Phase 15)', () => {
+  it('a nearby figure investigates a lamp going dark', () => {
+    const world = flatWorld();
+    groundChunked(world);
+    const { sim, npc } = spawned(world, 3, 8, 8);
+    run(sim, 2);
+    expect(['idle', 'wander', 'goto']).toContain(npc.activity);
+    sim.notify({ type: 'powerLost', x: 12, y: 12, z: 10 });
+    expect(npc.intent === 'investigate' || npc.activity === 'investigate').toBe(true);
+    expect(npc.fear).toBeGreaterThan(0);
+    expect(npc.fear).toBeLessThan(PANIC_THRESHOLD);
+  });
+
+  it('a distant outage draws no reaction', () => {
+    const world = flatWorld();
+    groundChunked(world);
+    const { sim, npc } = spawned(world, 3, 8, 8);
+    run(sim, 2);
+    const fearBefore = npc.fear;
+    sim.notify({ type: 'powerLost', x: 8 + 40, y: 12, z: 8 + 40 }); // ~56 cells out
+    expect(npc.intent).not.toBe('investigate');
+    expect(npc.fear).toBe(fearBefore);
+  });
+
+  it('sleepers keep sleeping; fleeing figures keep fleeing', () => {
+    const world = flatWorld();
+    groundChunked(world);
+    const { sim, sleeper } = (() => {
+      const s = new NpcSim(world, 5, { population: 0 });
+      const npc = s.spawn({ x: 8, y: 9, z: 8 });
+      npc.activity = 'sleep';
+      return { sim: s, sleeper: npc };
+    })();
+    sim.notify({ type: 'powerLost', x: 9, y: 12, z: 9 });
+    expect(sleeper.activity).toBe('sleep');
+
+    const { sim: sim2, npc: runner } = spawned(world, 6, 8, 8);
+    runner.activity = 'flee';
+    runner.fear = PANIC_THRESHOLD;
+    sim2.notify({ type: 'powerLost', x: 9, y: 12, z: 9 });
+    expect(runner.activity).toBe('flee');
+  });
+});

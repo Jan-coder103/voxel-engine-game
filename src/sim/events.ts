@@ -45,6 +45,20 @@ export type GameEvent =
       z: number;
       /** What killed the figure (swept away = landed in water). */
       cause: 'explosion' | 'drowned';
+    }
+  | {
+      type: 'powerLost';
+      /** The lamp cell that went dark. */
+      x: number;
+      y: number;
+      z: number;
+    }
+  | {
+      type: 'powerRestored';
+      /** The lamp cell that lit up. */
+      x: number;
+      y: number;
+      z: number;
     };
 
 export type GameEventType = GameEvent['type'];

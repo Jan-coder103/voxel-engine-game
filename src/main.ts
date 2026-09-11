@@ -4,6 +4,7 @@ import { World } from './voxel/world';
 import { streamingParams } from './voxel/streaming';
 import { DEFAULT_TERRAIN, type TerrainParams, generateChunk, heightAt } from './voxel/terrain';
 import { applyTown, findTownSpawn, planAt, townAnchors, townStats } from './worldgen/town';
+import { generatorSite, pipelineRoute } from './worldgen/utilities';
 import {
   AIR,
   WATER,
@@ -18,6 +19,8 @@ import { FluidSim } from './voxel/fluid';
 import { FireSim } from './voxel/fire';
 import { debrisFromCells, explode } from './voxel/damage';
 import { StructuralSim } from './voxel/structure';
+import { PowerSim } from './voxel/power';
+import { PlumbingSim } from './voxel/plumbing';
 import { NpcSim } from './npc/npc';
 import {
   AutosavePolicy,
@@ -51,6 +54,7 @@ import { DebrisSystem } from './render/debris';
 import { DustSystem } from './render/dust';
 import { FireFx } from './render/firefx';
 import { StructureViz } from './render/structureViz';
+import { PowerViz } from './render/powerViz';
 import { NpcViz } from './render/npcViz';
 import { SoundFx } from './audio/sfx';
 import { LocalStorageSaveStore } from './persistence/localStorageStore';
@@ -82,6 +86,9 @@ const FLUID_CELLS_PER_TICK = 384;
 const FIRE_CELLS_PER_TICK = 256;
 /** Structural analyses per fixed step (Phase 11; each is a few ms at most). */
 const STRUCTURE_ANALYSES_PER_TICK = 1;
+/** Utility component rebuilds per fixed step (Phase 15; one BFS each). */
+const POWER_REBUILDS_PER_TICK = 1;
+const PLUMBING_REBUILDS_PER_TICK = 1;
 
 const EDIT_REACH = 6;
 const AUTOSAVE_INTERVAL_MS = 20_000;
@@ -138,6 +145,8 @@ function main(): void {
   const fluid = new FluidSim(world); // before any chunk generation (hooks)
   const fire = new FireSim(world); // chains onto the fluid change hook
   const structure = new StructuralSim(world); // chains after fire (burn-outs collapse)
+  const power = new PowerSim(world); // lamp/cable/generator grid (Phase 15)
+  const plumbing = new PlumbingSim(world, fluid); // water main + leaks (Phase 15)
   const town = townAnchors(terrain);
   const npc = new NpcSim(world, terrain.seed, {
     anchors: town,
@@ -342,6 +351,7 @@ function main(): void {
   const dust = new DustSystem(engine.scene);
   const fireFx = new FireFx(engine.scene);
   const structureViz = new StructureViz(engine.scene);
+  const powerViz = new PowerViz(engine.scene);
   const npcViz = new NpcViz(engine.scene);
   const colorFor = (material: VoxelMaterialID) => getMaterial(material).color;
   let explosionSeed = 1;
@@ -358,6 +368,10 @@ function main(): void {
   bus.on('explosion', (event) => npc.notify(event));
   bus.on('structureCollapsed', (event) => npc.notify(event));
   bus.on('fireIgnited', (event) => npc.notify(event));
+  // Utilities (Phase 15): power events ride the same bus — a lamp going
+  // dark nearby draws a curious look (the Phase 13 anticipated case).
+  power.onEvent = (event) => bus.emit(event);
+  bus.on('powerLost', (event) => npc.notify(event));
   bus.on('fireExtinguished', (event) => {
     if (event.cause === 'water') {
       dust.puff(event.x + 0.5, event.y + 0.5, event.z + 0.5, {
@@ -599,7 +613,13 @@ function main(): void {
         fluid.loadLevels(data.waterLevels ?? {});
         fire.reset(); // loads are world resets: no fire survives a load
         structure.reset();
+        power.reset();
+        plumbing.reset();
         npc.reset();
+        // Utility state is derived from voxels: re-discover it on the
+        // chunks the journal just rewrote (their writes bypass hooks).
+        power.rescan();
+        plumbing.rescan();
         history.clear();
         autosave.markDirty();
       } catch (error) {
@@ -705,6 +725,10 @@ function main(): void {
       // Structural analysis last: it sees this step's edits, burn-outs
       // and the previous stage of any cascading collapse (Phase 11).
       structure.tick(STRUCTURE_ANALYSES_PER_TICK);
+      // Utilities (Phase 15): grid + water main rebuild around this
+      // step's edits (and pour on their own cadence) before NPCs act.
+      power.tick(POWER_REBUILDS_PER_TICK);
+      plumbing.tick(PLUMBING_REBUILDS_PER_TICK);
       // NPCs join the same fixed step (Phase 12): schedule, paths,
       // movement, population. Population centers on the player.
       npc.tick(player.position);
@@ -728,6 +752,8 @@ function main(): void {
     // Fire feedback: embers + smoke emitted from the burning cells.
     fireFx.update(frameDt, fire.burningList());
     structureViz.update(frameDt);
+    // Lit lamps mirror the power sim's lit set (revision-gated).
+    powerViz.update(power);
     // NPC figures mirror the sim's population.
     npcViz.update(npc.list());
 
@@ -813,6 +839,8 @@ function main(): void {
           (fire.burningCount > 0 ? ` · fire ${fire.burningCount}` : '') +
           (structure.pendingCount > 0 ? ` · struct q${structure.pendingCount}` : '') +
           (structureViz.enabled ? ' · struct-viz (G)' : '') +
+          (power.litCount > 0 ? ` · lamps ${power.litCount}` : '') +
+          (plumbing.leakCount > 0 ? ` · leaks ${plumbing.leakCount}` : '') +
           (npc.count > 0 ? ` · npc ${npc.count}` : '') +
           (npc.fleeingCount > 0 ? ` · panic ${npc.fleeingCount}` : ''),
       ];
@@ -871,10 +899,17 @@ function main(): void {
       npc,
       npcViz,
       bus,
+      power,
+      plumbing,
+      powerViz,
       town: {
         anchors: town,
         stats: townStats(terrain),
         planAt: (x: number, z: number) => planAt(x, z, terrain),
+      },
+      utilities: {
+        generatorSite: generatorSite(terrain),
+        route: pipelineRoute(terrain),
       },
       isLocked: () => input.isLocked,
     };

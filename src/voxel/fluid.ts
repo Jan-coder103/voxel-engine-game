@@ -160,6 +160,24 @@ export class FluidSim {
   }
 
   /**
+   * Place a finite amount of flowing water into an air cell (plumbing
+   * leaks and taps, Phase 15). Refuses non-air cells, source levels, and
+   * unloaded chunks. The write goes through `World.setVoxel`, so the
+   * water is journaled, remeshed, and visible to fire/structure/NPCs.
+   */
+  pour(x: number, y: number, z: number, level = 8): boolean {
+    if (level <= 0 || level >= WATER_SOURCE_LEVEL) return false;
+    if (this.world.getVoxel(x, y, z) !== AIR) return false;
+    if (!this.world.setVoxel(x, y, z, WATER)) return false;
+    this.mapForWrite(worldToChunk(x), worldToChunk(y), worldToChunk(z)).set(
+      levelIndex(x, y, z),
+      level,
+    );
+    this.activateAround(x, y, z);
+    return true;
+  }
+
+  /**
    * Run one simulation step over at most `budget` active cells. Returns
    * how many cells were processed. Deterministic given the same history.
    */
@@ -312,7 +330,15 @@ export class FluidSim {
 
   private deleteLevel(x: number, y: number, z: number): void {
     const map = this.levelsForChunk(worldToChunk(x), worldToChunk(y), worldToChunk(z));
-    if (!map) return;
+    if (!map) {
+      // levelsForChunk left (key, undefined) in the memo; clear it so a
+      // later mapForWrite for this chunk refreshes the memo (a stale key
+      // match here once made freshly poured water read as a phantom
+      // source — found by the Phase 15 plumbing pour path).
+      this.memoKey = undefined;
+      this.memoMap = undefined;
+      return;
+    }
     const index = levelIndex(x, y, z);
     if (!map.delete(index)) return;
     if (map.size === 0) {

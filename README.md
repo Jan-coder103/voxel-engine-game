@@ -6,7 +6,7 @@ and NPCs that react to all of it. Long-term roadmap lives in
 `MICRO_WORLD_DEVELOPMENT_PLAN.md`; session-by-session state lives in
 `MICRO_WORLD_PROGRESS.md`.
 
-**Current state:** Phases 0–14 complete — an infinite streamed world of
+**Current state:** Phases 0–15 complete — an infinite streamed world of
 deterministic seeded terrain that is **editable, saveable, and
 destructible**: brush tools, box selection, clipboard, prefabs, and a
 voxel inspector (creator mode), explosions with material resistance,
@@ -28,9 +28,13 @@ investigate distant noises, and run from rising water — all inside a
 **procedural town**: seeded roads and bridges over water, blocks and
 lots, parameterized houses (some two-story with walkable interior
 stairs), shops, industrial buildings, trees, and a population that
-lives in the buildings' doorsteps (Milestones 1–10 met; the Phase 8, 9
-and 11 gate criteria are verified by tests, benchmarks, and headless
-browser runs).
+lives in the buildings' doorsteps — now with **utilities**: a buried
+power grid feeds lampposts down every street (orphan the plant and the
+town blacks out; mend it and the lights come back), and a water main
+runs from a lakeside pump to a working fountain by the town center —
+burst the main and the lane floods until the pump is gone (Milestones
+1–11 met; the Phase 8, 9 and 11 gate criteria are verified by tests,
+benchmarks, and headless browser runs).
 
 ## Quickstart
 
@@ -47,12 +51,18 @@ You spawn on the edge of a **procedural town** (the same seed regenerates
 it bit-for-bit): roads and bridges over water, wood houses (some
 two-story — walk in and up the stairs), brick shops, concrete industrial
 buildings, trees, and wandering figures who sleep at the doorsteps after
-dark. Light a house on fire and watch what the neighborhood does.
+dark. The streets carry working utilities: a buried power grid lights
+the lampposts (dig up the plant at the central crossroads and the town
+goes dark; rebuild it and the lights pop back on), and a water main
+feeds a fountain near the center — break the main and watch the lane
+flood until you rip out the pump. Light a house on fire and watch what
+the neighborhood does.
 
 Controls: click to capture the mouse, **WASD** move, **Space** jump
 (hold against a bank underwater to climb out), **Esc** release the
 mouse; **LMB** remove, **RMB** place, **MMB** pick material, **F** paint,
-**1–9**/wheel select material (6 = water — it flows), **Ctrl+Z/Y**
+**1–9**/wheel select material (6 = water — it flows; 12–17 are
+copper/lamp/generator/pipe/pump/tap — build your own grid or main), **Ctrl+Z/Y**
 undo/redo, **K** save, **L** load, **N** mute sound. Fall into the void
 and you respawn. The world autosaves (20 s cadence + when the tab hides)
 and restores on reload; `?seed=1234` starts a different fresh world.
@@ -99,6 +109,9 @@ src/voxel/                 World state (no three.js — see ADR-002)
   fire.ts                  Cellular fire: fuel, heat, spread, extinguish (pure)
   damage.ts                Explosion damage fields, debris specs (pure)
   structure.ts             Structural sim: support graph (cantilever), stress, collapse (pure)
+  power.ts                 Power grid: components, supply/demand, outages (pure)
+  plumbing.ts              Water main: pressure, leaks, taps (pure)
+  cachedReader.ts          Chunk-cached voxel reader for component floods
   persistence.ts           Versioned save schema, migration, autosave policy
   mesher.ts                Naive culled mesher (correctness baseline)
   greedyMesher.ts          Greedy mesher (production) → typed arrays
@@ -120,6 +133,8 @@ src/npc/                   NPC simulation (pure — no three.js)
 src/worldgen/
   town.ts                  Procedural town (Phase 14): road/lot plan, building
                            generators, bridges, trees, NPC door anchors (pure)
+  utilities.ts             Generated utilities (Phase 15): buried cable,
+                           lampposts, generator, water main + tap (pure)
 src/player/
   controller.ts            Pure physics: look, gravity, AABB per-axis collision
   input.ts                 DOM keyboard + pointer-lock mouse
