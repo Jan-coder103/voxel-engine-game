@@ -1,5 +1,5 @@
 import type { WorldCoordinate } from './voxel/coordinates';
-import { CHUNK_SIZE, WORLD_HEIGHT_CHUNKS } from './voxel/coordinates';
+import { CHUNK_SIZE, WORLD_HEIGHT, WORLD_HEIGHT_CHUNKS } from './voxel/coordinates';
 import { World } from './voxel/world';
 import { streamingParams } from './voxel/streaming';
 import { DEFAULT_TERRAIN, type TerrainParams, generateChunk, heightAt } from './voxel/terrain';
@@ -21,6 +21,7 @@ import { debrisFromCells, explode } from './voxel/damage';
 import { StructuralSim } from './voxel/structure';
 import { PowerSim } from './voxel/power';
 import { PlumbingSim } from './voxel/plumbing';
+import { AtmosphereSim, type Weather } from './sim/atmosphere';
 import { NpcSim } from './npc/npc';
 import {
   AutosavePolicy,
@@ -56,6 +57,7 @@ import { FireFx } from './render/firefx';
 import { StructureViz } from './render/structureViz';
 import { PowerViz } from './render/powerViz';
 import { NpcViz } from './render/npcViz';
+import { AtmosphereViz } from './render/atmosphereViz';
 import { SoundFx } from './audio/sfx';
 import { LocalStorageSaveStore } from './persistence/localStorageStore';
 import { InputManager } from './player/input';
@@ -147,10 +149,15 @@ function main(): void {
   const structure = new StructuralSim(world); // chains after fire (burn-outs collapse)
   const power = new PowerSim(world); // lamp/cable/generator grid (Phase 15)
   const plumbing = new PlumbingSim(world, fluid); // water main + leaks (Phase 15)
+  // The world clock + weather (Phase 16) — constructed before the NPC sim
+  // so its schedule can read the atmosphere's ticks.
+  const atmosphere = new AtmosphereSim(terrain.seed);
   const town = townAnchors(terrain);
   const npc = new NpcSim(world, terrain.seed, {
     anchors: town,
     groundY: (x, z) => heightAt(x, z, terrain),
+    clock: () => atmosphere.timeTicks,
+    lightLevel: () => atmosphere.snapshot.daylight,
   }); // observes edits to re-path; homes/workplaces are town doors (Phase 14)
   if (restore) {
     world.loadEdits(restore.edits);
@@ -353,6 +360,7 @@ function main(): void {
   const structureViz = new StructureViz(engine.scene);
   const powerViz = new PowerViz(engine.scene);
   const npcViz = new NpcViz(engine.scene);
+  const atmosphereViz = new AtmosphereViz(engine.scene, materials, fogNear, fogFar);
   const colorFor = (material: VoxelMaterialID) => getMaterial(material).color;
   let explosionSeed = 1;
 
@@ -373,7 +381,7 @@ function main(): void {
   power.onEvent = (event) => bus.emit(event);
   bus.on('powerLost', (event) => npc.notify(event));
   bus.on('fireExtinguished', (event) => {
-    if (event.cause === 'water') {
+    if (event.cause === 'water' || event.cause === 'rain') {
       dust.puff(event.x + 0.5, event.y + 0.5, event.z + 0.5, {
         count: 6,
         spread: 0.7,
@@ -382,6 +390,21 @@ function main(): void {
       });
     }
   });
+  // Lightning (Phase 16): storms strike near the player — always a
+  // flash and a thunder boom, and whatever stands at the landing spot
+  // really catches. The strike itself overpowers the rain (a bolt is
+  // hotter than weather); any fire it starts still has to beat the
+  // wetting in the fire sim, so storm fires struggle to spread far.
+  atmosphere.onStrike = (x, z) => {
+    atmosphereViz.strikeFlash();
+    sfx.boom();
+    for (let y = WORLD_HEIGHT - 1; y >= 0; y--) {
+      if (world.getVoxel(x, y, z) !== AIR) {
+        fire.ignite(x, y, z, true);
+        break;
+      }
+    }
+  };
 
   /**
    * Structural collapse (Phase 11): the sim proposes the cells that lost
@@ -715,6 +738,12 @@ function main(): void {
         input.consumeKeyPresses();
         input.consumeWheelSteps();
       }
+      // World clock (Phase 16): time and weather advance first so every
+      // sim this step reads the same instant; precipitation feeds fire.
+      atmosphere.strikeCenter.x = player.position.x;
+      atmosphere.strikeCenter.z = player.position.z;
+      atmosphere.tick();
+      fire.setRain(atmosphere.snapshot.precip);
       // Water simulation runs every fixed step, locked or not; the
       // activity budget keeps the cost bounded while floods spread.
       fluid.tick(FLUID_CELLS_PER_TICK);
@@ -756,6 +785,8 @@ function main(): void {
     powerViz.update(power);
     // NPC figures mirror the sim's population.
     npcViz.update(npc.list());
+    // Sky, fog, ambient light, and precipitation mirror the atmosphere.
+    atmosphereViz.update(atmosphere.snapshot, engine.camera.position, frameDt, engine.scene);
 
     // Targeting + edit previews (render only; input handled above).
     const hit = input.isLocked ? targetHit() : undefined;
@@ -826,12 +857,15 @@ function main(): void {
         ? `${hit.voxel.x},${hit.voxel.y},${hit.voxel.z} ${getMaterial(hit.material).name}`
         : '—';
       const savedText = lastSaveAt === undefined ? 'unsaved' : `saved ${saveAge(lastSaveAt)}`;
+      const weather = atmosphere.snapshot;
+      const sky = weather.snowing ? 'snow' : weather.weather;
       const lines = [
         `fps ${fps} · chunks ${s.meshed} (q ${s.queued}, lod1 ${s.lod1}) · ` +
           `${(s.quads / 1000).toFixed(1)}k quads · ` +
           `pos ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}` +
           (player.onGround ? '' : ' · air'),
-        `mat ${selected.name} · target ${target} · undo ${history.depth} · ` +
+        `${atmosphere.clockString()} day ${weather.day} · ${sky} · ` +
+          `mat ${selected.name} · target ${target} · undo ${history.depth} · ` +
           `seed ${terrain.seed} · ${savedText} · snd ${sfx.enabled ? 'on' : 'off'} · ` +
           `debris ${debris.activeCount}/${debris.capacity}` +
           (player.inWater ? ' · swimming' : '') +
@@ -902,6 +936,14 @@ function main(): void {
       power,
       plumbing,
       powerViz,
+      atmosphere: {
+        state: atmosphere.snapshot,
+        clock: () => atmosphere.clockString(),
+        setTime: (t: number) => atmosphere.syncTo(t),
+        force: (w: Weather) => atmosphere.forceWeather(w),
+        strike: (x: number, z: number) => atmosphere.onStrike?.(x, z),
+        viz: atmosphereViz,
+      },
       town: {
         anchors: town,
         stats: townStats(terrain),

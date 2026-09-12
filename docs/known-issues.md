@@ -292,6 +292,47 @@ milestone goes here before it goes to the backlog.
   the water main's riser blocks one lane cell. A pole cut at its base
   topples into the structural sim like any unsupported column.
 
+## Atmosphere (Phase 16)
+
+- **No voxel light field yet — lamps still don't illuminate.** Night is
+  palette-ambient only (the voxel shader's sun term re-aims at the moon
+  with a faint tint); lit lamps keep their `powerViz` glow shells but
+  cast no light on the street. The sky reads correctly; the ground
+  barely changes. The light field (sunlight columns + lamp/fire sources,
+  BFS like the fluid sim) is the Phase 17 lighting pass.
+- **Rain does not accumulate.** Precip interacts with fire (wetting/
+  dousing) but not with the fluid sim — no puddles, no rising lakes, no
+  snow cover. The Phase 9 coupling (rain → `pour` at the surface) is
+  deferred; the rain/snow particles are visual-only.
+- **No wind→fire coupling.** The weather profile carries a wind vector
+  (the clouds scroll with it, rain slants) but fire still spreads
+  isotropically; wind-driven fire fronts are a later coupling.
+- **Lightning fires usually self-extinguish.** A strike force-ignites
+  the top cell, but while the storm's rain keeps falling the wetting
+  out-races fuel burn-down, so storm fires typically douse in cause
+  `'rain'` before spreading. The storm→fire→collapse chain exists but
+  is rare by design; `forceWeather('clear')` + `strike()` is the
+  reliable scenario path.
+- **Seasons are sun/temp/color only.** No snow accumulation, no
+  vegetation change, no seasonal fire risk — the season blends the sun
+  arc, daylight fraction, and a °C-proxy temperature (which nothing
+  consumes yet beyond the HUD-adjacent snapshot).
+- **`forceWeather` breaks (seed, tick) purity until reset.** The debug
+  override installs a synthetic segment; worlds resumed from a save
+  taken mid-override continue the override chain (weather is transient
+  and not saved, so a page reload is the clean reset).
+- **Sky colors are palette lerps, not scattering.** Dawn/noon/dusk/night
+  bands hand-tuned against hex targets; no Rayleigh/Mie model, no
+  tonemapping interaction (the legacy renderer path is unlit custom
+  shaders end to end).
+- **Clouds are 2D fbm on a dome.** No volume, no cloud shadows, no
+  coverage-dependent light dimming on the ground (the palette's
+  `darkness` dims ambient only). Star field is hash noise, not a
+  celestial map.
+- **Temperature is a scalar proxy.** One global value per tick (season
+  blend × daylight); no per-region climate, altitude lapse, or heat
+  coupling to the fire sim's temperature accumulator.
+
 ## GUI verification (headless)
 
 - **Automated browser runs have input races.** Under SwiftShader

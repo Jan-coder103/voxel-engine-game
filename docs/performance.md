@@ -254,6 +254,24 @@ pour pass is a handful of `pour` calls. VM caveat applies — treat the
 absolute ms as machine-relative; the ratios and budget behavior are
 the durable facts.
 
+## Baselines — atmosphere (`benchmarks/atmosphere.bench.ts`)
+
+2026-09-13, dev VM (2–3 cores, loaded; treat absolutes as machine-relative).
+
+| Scene                                            | ≈ time/op     |
+| ------------------------------------------------ | ------------- |
+| GATE — atmosphere tick (weather + sky + seasons) | 0.025 ms mean |
+| `syncTo` fast-forward, full 76.8k-tick year      | 0.010 ms      |
+| fire tick, 256 burning cells, clear weather      | 2.67 ms       |
+| fire tick, 256 burning cells, storm (rain on)    | 4.45 ms       |
+
+Reading: the atmosphere tick is noise-level and runs every fixed step
+(it replaces the old "no-op" in the same slot). The storm fire delta is
+the per-cell sky-exposure scans for wetting (~+67%); it stays inside
+the frame at the 256-cell budget and only matters while cells are
+actively burning in rain. `syncTo`'s segment walk makes clock
+fast-forwards (harness, debug) free.
+
 ## Runtime (dev session, Phase 5–8 demo)
 
 - 60 fps (vsync-capped) in the in-app browser at 1280×720 with render

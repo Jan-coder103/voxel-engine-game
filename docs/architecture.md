@@ -549,6 +549,54 @@ is transient and derived from voxels; the save format is untouched.
   only when utility cells actually change, budgeted one per tick.
   `FluidSim.pour` reuses the Phase 9 write path (journaled, remeshed).
 
+## Atmosphere (Phase 16)
+
+Phase 16 gives the world a clock and a sky. The core is pure
+(`src/sim/atmosphere.ts`), ticked once per fixed step; everything
+render-side consumes an immutable snapshot. Same (seed, tick) → same
+sky, always; fresh worlds start day 0 at 08:00 (transient — not in the
+save format; the L-key load does not reset the clock, consequences of
+weather like burn-outs still persist via the journal).
+
+- **Clock**: 100 ticks/hour, day = 2400 ticks ≈ 40 s real time; 8
+  real days per season, 32-day year (spring → summer → autumn →
+  winter, blending over each season's first day — day 0 is pure
+  spring). `bodyDir()` sweeps the sun (and the moon, half a day off)
+  along an azimuth arc with `y = sin(elevation)` exact; per-season max
+  elevation (spring .95 / summer 1.15 / autumn .9 / winter .62 rad),
+  daylight fraction, and a °C-proxy temperature blend.
+- **Weather** is a seeded Markov segment chain (clear → cloudy →
+  overcast → rain → storm with back-edges); segment state, hold
+  (600–2000 ticks), and fade (120–280 ticks) all hash-derive from
+  (seed, segmentIndex), so `syncTo(t)` equals stepping — a full year
+  fast-forwards in ~0.01 ms. Profiles blend cloudiness / precip /
+  wind / fog / darkness smoothly; below-freezing rain renders as snow.
+  `forceWeather(w)` is an instant debug/scenario segment (deliberately
+  breaks (seed, tick) purity until reset).
+- **Lightning**: while storming, a per-tick hash gate fires
+  `onStrike(x, z)` near a caller-provided center (main keeps it at the
+  player). The pure core never touches voxels — main flashes the sky,
+  booms, and force-ignites the top solid cell.
+- **Palette** (`skyPalette(state)`, pure hex math): zenith / horizon /
+  fog / sun tint + intensities, ambient sky/ground, star / moon /
+  sun-disc levels. Clear noon reproduces the pre-atmosphere look.
+- **Couplings**: NPC schedules read the world clock via an injected
+  `clock` option and night halves sight range via `lightLevel`
+  (`perception.canSee` takes an optional range); fire reads rain —
+  sky-exposed burning cells soak wetness (~60 ticks of full rain) then
+  extinguish with cause `'rain'`, roofed cells stay dry, exposed heat
+  decays 2×, and `ignite()` refuses exposed cells while any rain falls
+  unless forced (lightning forces).
+- **Rendering** (`src/render/atmosphereViz.ts`, `src/render/rainfx.ts`):
+  one sky-dome ShaderMaterial (BackSide, follows the camera) — gradient,
+  sun disc + halo, moon, hash stars, 3-octave fbm clouds scrolling with
+  the wind, lightning flash (fbm is capped at 3 octaves and skipped
+  entirely when coverage ≤ 0.2 — every pixel runs on the CPU under
+  SwiftShader). The palette is also applied to the voxel shader
+  uniforms (sun/ambient/fog; at night the sun term re-aims at the moon
+  with a faint blue tint) and `PrecipSystem` pools instanced rain
+  streaks / snow flakes around the camera.
+
 ## Chunk meshing and streaming
 
 - Production meshing is `meshVolumeGreedy`: the 0fps per-axis sweep —
@@ -665,9 +713,13 @@ depth write so lake beds stay visible.
   invariants, bridges, trees, anchors, materials), navigation + NPC +
   reactions, utilities (grid light/cut/mend, brownout order,
   independent networks, silent discovery, rescan; pressurized mains,
-  leaks, taps, severed-side isolation, pour rules), and town utilities
+  leaks, taps, severed-side isolation, pour rules), town utilities
   (every generated lamp lit on two seeds, plant anatomy, pole anatomy,
-  continuous pressurized main, burst-and-rip end-to-end).
+  continuous pressurized main, burst-and-rip end-to-end), and
+  atmosphere (clock/seasons, stepping ≡ syncTo determinism, weather
+  reachability + smoothness + force, deterministic lightning, sun
+  noon/midnight, seasonal sun/daylight, snow-vs-rain, palette shapes,
+  fire×rain douse/roof/refuse/force, NPC clock injection + night sight).
 - Benchmarks: `benchmarks/mesher.bench.ts` (naive vs greedy, solid/
   checker/layered/terrain), `benchmarks/storage.bench.ts` (dense vs
   packed), `benchmarks/terrain.bench.ts`, `benchmarks/destruction.bench.ts`
@@ -678,7 +730,9 @@ depth write so lake beds stay visible.
   collapse cascade), `benchmarks/town.bench.ts` (generation overlay,
   plan, census), `benchmarks/npc.bench.ts` (re-path, population tick),
   `benchmarks/utilities.bench.ts` (grid rebuild gate, main rebuild,
-  pour cadence, route scan). Baselines in `docs/performance.md`.
+  pour cadence, route scan), `benchmarks/atmosphere.bench.ts` (per-tick
+  atmosphere cost, full-year syncTo, fire tick clear vs storm). Baselines
+  in `docs/performance.md`.
 - Headless GUI verification: `.verify/run.mjs` (local, gitignored)
   drives the real game in Playwright Chromium through the dev-only
   `__mw` hook — pointer lock, brush strokes, selection/clipboard/

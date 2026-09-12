@@ -4,6 +4,82 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.14.0] — 2026-09-13 — Phase 16 (Atmosphere)
+
+### Added
+
+- **World clock + sky** (`src/sim/atmosphere.ts`, pure): 100 ticks/hour
+  (day ≈ 40 s real), 8-day seasons over a 32-day year with blended
+  transitions (day 0 is pure spring — the day-0-inherits-winter bug is
+  pinned by the dawn→noon harness check), sun and moon arcs with exact
+  elevation math, per-season max elevation / daylight / temperature
+  proxies. Same (seed, tick) → same sky, always; stepping ≡ `syncTo`
+  (a full-year fast-forward costs ~0.01 ms). Clock constants moved here
+  (`src/npc/npc.ts` re-exports — old imports keep working); fresh
+  worlds start day 0, 08:00. Transient by design: not in the save
+  format; the L-key load does not reset the clock.
+- **Weather machine**: seeded Markov segment chain (clear → cloudy →
+  overcast → rain → storm, back-edges included) with hash-derived
+  holds/fades and smooth profile blending (cloudiness, precip, wind,
+  fog, darkness); sub-freezing precip renders as snow. `forceWeather`
+  is an instant debug/scenario override.
+- **Lightning**: per-tick hash gate while storming fires `onStrike(x, z)`
+  near a caller-set center — main flashes the sky, booms, and
+  force-ignites the top solid cell. Pure core stays voxel-free.
+- **Sky palette** (`skyPalette`, pure hex math): zenith/horizon/fog/sun
+  colors + intensities, ambient, star/moon/sun-disc levels; clear noon
+  reproduces the pre-atmosphere look.
+- **Render** (`src/render/atmosphereViz.ts`, `src/render/rainfx.ts`):
+  camera-following sky-dome shader (gradient, sun disc + halo, moon,
+  hash stars, 3-octave fbm clouds scrolling with the wind, lightning
+  flash; fbm skipped when coverage ≤ 0.2 — SwiftShader CPU-rasterizes
+  every pixel) plus palette application to the voxel shader uniforms
+  (sun/ambient/fog; night re-aims the sun term at the moon with a faint
+  blue tint); pooled instanced rain-streak / snow-flake system.
+- **Couplings**: NPC schedules follow the world clock (injected
+  `clock` option; `reset()` re-reads it so time survives a load) and
+  night shrinks sight range to ~⅓ via the injected `lightLevel`
+  (`canSee` gained an optional range). Fire reads rain: sky-exposed
+  burning cells soak wet (~60 ticks of full rain) then extinguish with
+  cause `'rain'`, roofed cells survive, exposed heat decays 2×, and
+  `ignite()` refuses exposed cells in any rain unless forced
+  (lightning forces; storm fires still struggle against the wetting).
+  `fireExtinguished.cause` gained `'rain'` (additive union growth).
+- **Tests**: 22 new (401 total, 31 files) — clock/seasons, determinism
+  (stepping ≡ syncTo at a deep mid-chain point, seed divergence),
+  weather reachability/smoothness/force, deterministic lightning,
+  sun/noon/midnight, seasonal discriminators, snow-vs-rain, palette
+  day/night/dawn/storm shapes, fire×rain (douse cause, roofed survival,
+  refused vs forced ignition), NPC clock injection + night sight.
+- **Benchmarks** (`benchmarks/atmosphere.bench.ts`): atmosphere tick
+  0.025 ms mean (runs every fixed step), full-year syncTo 0.010 ms,
+  fire 256-cell tick 2.67 ms clear vs 4.45 ms storm (sky-exposure
+  scans; VM numbers). Baselines in `docs/performance.md`.
+- **Harness** (`.verify/run.mjs`): Phase 16 section (8 checks) — clock
+  HUD, dawn→noon sun climb, midnight dark + stars, NPC clock parity,
+  winter snow, dry re-ignition after rain, storm dousing + precip +
+  rain drops, lightning flash + ignition.
+
+### Fixed
+
+- **`syncTo` infinite loop**: the fast-forward advanced the weather
+  chain keyed on the target tick while `advance()` walks against
+  `timeTicks` — which syncTo set only after the loop. Found by a
+  vite-node probe after vitest workers spun at 99% CPU with zero tests
+  completing; regression-covered by the stepping ≡ syncTo test.
+- **Day 0 inherited the previous season's sun**: the season blend
+  samples "previous season" at 0 on a season's first day, so the
+  world's first noon read winter elevation 0.62 rad. `day === 0` now
+  blends to 1 (pure spring); found by the first full harness run.
+
+### Changed
+
+- HUD line 2 leads with `HH:MM day N · weather`; `__mw.atmosphere`
+  exposes `state`, `clock()`, `setTime` (syncTo), `force`, `strike`,
+  and the viz. Phase 12/13 harness night-checks repointed from
+  `npc.timeTicks` pokes to `atmosphere.setTime` (the injected world
+  clock correctly overwrites the raw poke now).
+
 ## [0.13.0] — 2026-09-11 — Phase 15 (Utilities)
 
 ### Added

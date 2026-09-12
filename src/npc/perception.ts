@@ -72,17 +72,20 @@ export function withinFov(eye: Point3, yaw: number, target: Point3): boolean {
   return (dx / len) * fx + (dz / len) * fz >= COS_HALF_FOV;
 }
 
-/** Full vision test: range, then field of view, then occlusion. */
+/** Full vision test: range, then field of view, then occlusion. `range`
+ * defaults to the full daylight distance (Phase 16 passes a light-scaled
+ * one — moonlight sees about a third as far). */
 export function canSee(
   materialAt: (x: number, y: number, z: number) => VoxelMaterialID,
   eye: Point3,
   yaw: number,
   target: Point3,
+  range: number = SIGHT_DISTANCE,
 ): boolean {
   const dx = target.x - eye.x;
   const dy = target.y - eye.y;
   const dz = target.z - eye.z;
-  if (Math.hypot(dx, dy, dz) > SIGHT_DISTANCE) return false;
+  if (Math.hypot(dx, dy, dz) > range) return false;
   if (!withinFov(eye, yaw, target)) return false;
   return hasLineOfSight(materialAt, eye, target);
 }

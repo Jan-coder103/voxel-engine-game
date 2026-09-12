@@ -31,23 +31,92 @@
 
 ## Overall Phase
 
-**Current phase:** Phase 15 (Utilities) — **complete and committed** (implementation, verification, docs). Milestone 12 met: the town has **working power and water** — a buried grid lights every street lamp, and a water main feeds a real fountain; both fail believably (orphan the plant → blackout; burst the main → flood; destroy the pump → everything dries up). Next: Phase 16 (Weather/Atmosphere) per the plan (§114), or Phase 17 (Visual Polish) if atmosphere stays cut.
+**Current phase:** Phase 16 (Weather/Atmosphere) — **complete and committed** (implementation, gates, docs). Milestone 13 met: the world runs on a real clock under a seeded sky — day/night with seasons, a weather machine (clear → cloudy → overcast → rain → storm) with smooth transitions, rain/snow, lightning that ignites (and rain that douses), and NPC schedules/sight now follow the sun. One deferral: the two consecutive full harness confirmation runs are pending (heavy-run deferral, tracked in HANDOFF). Next: Phase 17 (Visual Polish, plan §117) — the voxel light field first.
 
-**Current milestone:** Milestones 1–12 met. Phase 15 adds two component-rebuilding sims (power, plumbing) on the structure.ts pattern, six appended materials (copper, lamp, generator, pipe, pump, tap), generated utilities in the town (buried cable under every road-line center column, lampposts every 8th center column, a generator at the central intersection, a water main from a lakeside pump to a standpipe tap), `powerLost`/`powerRestored` bus events with the Phase 13 NPC outage reaction, and a lit-lamp glow overlay.
+**Current milestone:** Milestones 1–13 met. Phase 16 adds the pure atmosphere core (clock, sun/moon arcs, seasons, weather Markov chain, lightning gate, sky palette), NPC clock/light injection, fire×rain coupling (wet/douse/refuse/force-ignite), the sky-dome + precip rendering, and 22 tests (401 total).
 
-**Overall completion:** ~66% (Phases 0–15 done; deferred: NPC inventory, hunger consequences, NPC wading/swimming, real day/night clock (Phase 16), fire persistence in saves, volumetric smoke, Phase 11 deferrals (lateral load, rigid bodies, wind/rain coupling), fear herding/personality, glass transparency, traffic graph, voltage/current model + switches/valves/drains/sewer (documented in known-issues "Utilities"), pump power coupling, lamp light contribution)
+**Overall completion:** ~69% (Phases 0–16 done; deferred: NPC inventory, hunger consequences, NPC wading/swimming, fire persistence in saves, volumetric smoke, rain→fluid accumulation, wind→fire coupling, snow/vegetation seasonality, Phase 11 deferrals (lateral load, rigid bodies), fear herding/personality, glass transparency, traffic graph, voltage/current model + switches/valves/drains/sewer (known-issues "Utilities"), pump power coupling, **lamp light contribution (Phase 17 lighting — next)**)
 
-**Last completed task:** Session 011 (2026-09-11) — implemented Phase 15: pure power sim (`src/voxel/power.ts`: component rebuilds with per-side independence, supply/demand brownout in BFS order from generators, silent discovery scans, `rescan`), pure plumbing sim (`src/voxel/plumbing.ts`: pressurized components, leak refill pours + tap fountains through `FluidSim.pour`, pump-destroyed dry-up); generated utilities (`src/worldgen/utilities.ts` + hooks in `applyTown`); six appended materials (ids 12–17) — save format untouched; `cachedReader` for flood-scale reads; 32 tests (379 total); headless Phase 15 section 8/8 green twice; full-town grid rebuild ~12 ms on the dev VM.
+**Last completed task:** Session 012 (2026-09-12 → 13) — implemented Phase 16: pure atmosphere sim (`src/sim/atmosphere.ts`: clock/seasons/weather/lightning/palette, stepping ≡ syncTo determinism), NPC clock+lightLevel injection, fire setRain coupling with sky-exposure wetting, sky-dome + rain/snow rendering, 22 tests (401 total), atmosphere benchmarks, harness Phase 16 section (ran once pre-fix 7/8; fixes probe-verified), docs.
 
 **Current task:** None — session complete, work committed.
 
-**Blocked by:** Nothing.
+**Blocked by:** Nothing. (Pending when the machine is idle: the two harness confirmation runs listed in HANDOFF.)
 
-**Next recommended action:** **Phase 16 (Weather/Atmosphere)** per the plan (§114): the day/night cycle is the highest-value item — the NPC schedule already runs a placeholder tick clock, lamps exist to matter at night, and weather hooks (rain → fire coupling, storm → the Phase 18 scenario seeds) are the natural follow-on. Fog/sky/stars first, then rain. Alternatively Phase 17 visual polish if the lighting debt (lamps that don't illuminate) bothers the demo first.
+**Next recommended action:** **Phase 17 (Visual Polish)** per the plan (§117): the voxel light field is the big win — sunlight columns + block light from lamps/fire with BFS propagation and incremental updates on the World hook, consumed by the mesher as a per-vertex light attribute (sky × daylight + warm block light) — lamps finally illuminate streets at night and fire lights rooms; the powerViz glow shells get a real light source behind them. Vertex AO in the mesher is the cheap second win. Post-FX/reflections stay deferred (SwiftShader software GL).
 
 ---
 
 # Session Log
+
+## Session 012 — 2026-09-12 → 13
+
+**Status:** Complete — Phase 16 (Weather/Atmosphere) implemented, gated, documented, committed. Milestone 13 met. One deliberate deferral: the two consecutive full headless-harness confirmation runs were **not** re-run this session (VM load policy — the user asked to skip long/heavy runs; see "Deferred deliberately" and HANDOFF for the pending-run list). The Phase 16 harness section ran once end-to-end pre-fix (7/8 green, zero page errors); the three failures it exposed were fixed and probe-verified in-page, and all 401 unit tests, typecheck, lint, build, and benchmarks are green.
+
+### Completed
+
+- [x] Pure atmosphere core (`src/sim/atmosphere.ts`, ADR-002/005): **clock** — 100 ticks/hour (day = 2400 ticks ≈ 40 s real; constants moved here, `src/npc/npc.ts` re-exports), 8-day seasons on a 32-day year, fresh worlds at day 0 08:00; **sun/seasons** — per-season max elevation (spring .95 / summer 1.15 / autumn .9 / winter .62 rad), daylight fraction (.5/.56/.5/.45), temperature proxies (12/24/10/−4 °C), season blends over each season's first day (day 0 forced pure spring); `bodyDir()` sweeps azimuth 0…π with `y = sin(elev)` exact, moon half a day off.
+- [x] **Weather machine**: seeded Markov segment chain (clear → cloudy → overcast → rain → storm with back-edges), hash-derived state/hold (600–2000)/fade (120–280) per (seed, segmentIndex) — `syncTo(t)` exactly equals stepping (full 76.8k-tick year in ~0.010 ms); blended profiles for cloudiness/precip/wind/fog/darkness; sub-freezing precip = snow; `forceWeather(w)` debug override.
+- [x] **Lightning**: per-tick hash gate (< 1/650) while storming fires `onStrike(x, z)` near a caller-held center (main: the player); pure core never touches voxels.
+- [x] **Sky palette** (`skyPalette`, pure hex math): zenith/horizon/fog/sun tint + intensities, ambient sky/ground, star/moon/sun-disc levels; clear noon = the pre-atmosphere look (0x87b5e0).
+- [x] **NPC couplings** (`src/npc/npc.ts`, `perception.ts`): `NpcSimOptions.clock` (schedule follows the world clock; sim-local ticks when omitted — old tests unchanged) and `lightLevel` (night sight = range × (0.35 + 0.65·light), moonlight sees ~⅓ as far; `canSee` gained an optional range param); `reset()` re-reads the injected clock so time survives a load.
+- [x] **Fire × rain** (`src/voxel/fire.ts`): `setRain(0..1)` fed from the snapshot each fixed step; sky-exposed burning cells (new 32-cell vertical `isSkyExposed` scan; AIR/WATER don't block) soak wetness (60 ticks of full rain → `WET_THRESHOLD`) then extinguish with **cause `'rain'`** (events union grew additively); roofed cells dry; exposed heat decays 2×; `ignite()` refuses exposed cells while any rain falls unless `force=true` (lightning forces; storm fires still fight the wetting). Wet map cleaned in reset/extinguish/burn-out/change-hook; `exportState` gained wet+rain.
+- [x] **Render** (`src/render/atmosphereViz.ts`, `src/render/rainfx.ts` NEW): camera-following sky-dome ShaderMaterial (gradient, sun disc + halo, moon disc, hash stars, 3-octave fbm clouds scrolling with the wind, lightning `uFlash`; fbm skipped entirely at coverage ≤ 0.2 — SwiftShader rasterizes every pixel on the CPU) applying the palette to the voxel shader uniforms (sun/ambient/fog near/far; night re-aims the shader's sun term at the moon with a faint blue tint); `PrecipSystem` — pooled InstancedMesh, rain streaks (wind-slanted) or snow flakes (slow, swaying), spawn ∝ precip around the camera, `precipCount` for the harness.
+- [x] **main.ts wiring**: AtmosphereSim before NpcSim; fixed step = strikeCenter → `atmosphere.tick()` → `fire.setRain(precip)` → sim chain; per-frame `atmosphereViz.update`; HUD line 2 `HH:MM day N · weather`; `onStrike` = flash + thunder + top-cell force-ignite; `__mw.atmosphere` = { state, clock, setTime, force, strike, viz }.
+- [x] **Tests** (`tests/atmosphere.test.ts`, NEW — 22; **401 total**, 31 files): clock/seasons, determinism (stepping ≡ syncTo at a deep mid-chain point, seed divergence), weather reachability + per-tick smoothness + force, deterministic lightning (finds the exact strike tick via the same hash3), sun/noon/midnight, summer>winter discriminators, temperatures, snow-in-winter vs rain-in-summer, palette day/night/dawn/storm shapes, fire×rain (douse cause, roofed survival, refused vs forced ignite), NPC clock injection (incl. reset) + night sight + night sends figures home.
+- [x] **Benchmarks** (`benchmarks/atmosphere.bench.ts`, NEW): GATE atmosphere tick **0.025 ms** mean (every fixed step); syncTo full year **0.010 ms**; fire 256-cell tick **2.67 ms** clear vs **4.45 ms** storm (sky scans ≈ +67%, inside the frame). VM numbers — `docs/performance.md`.
+- [x] **Harness** (`.verify/run.mjs`): Phase 16 section on `?seed=97531` (8 checks: hook+HUD clock, dawn→noon sun climb, midnight dark + stars, NPC/world clock parity, winter snow, dry re-ignition after rain, storm dousing + precip + drops, lightning flash + ignition; weather pinned with `force('clear')`, storm waits poll at SwiftShader rates). The Phase 12/13 night fast-forwards repointed from `npc.timeTicks` pokes to `atmosphere.setTime` (the injected clock now correctly overwrites raw pokes).
+- [x] **Docs**: architecture "Atmosphere (Phase 16)" + test/benchmark lists, performance atmosphere baselines, known-issues new "Atmosphere (Phase 16)" section (9 entries), README (state 0–16, quickstart atmosphere paragraph, layout), CHANGELOG `[0.14.0]`, this file + checklist realignment (checklist's old "Phase 16 — Rendering Polish" / "Phase 17 — Audio" headers repointed to Phase 17 Visual Polish, matching plan §117).
+
+### Fixed (found by probes/harness; all unit-green after)
+
+- **`syncTo` infinite loop (would have hung every harness run)**: it advanced the weather chain in a loop keyed on the _target_ tick while `advance()` walks segments against `this.timeTicks` — which syncTo didn't update first, so the loop body never did anything. Found by a vite-node probe after vitest workers spun at 99% CPU with zero tests completing. Fix: set `timeTicks = t` before advancing; the stepping ≡ syncTo unit test pins it.
+- **Day 0 inherited winter's sun** (harness: first-world noon elevation read 0.62 = winter's max): the season blend `smooth(clamp01(dayInSeason))` is 0 on a season's first day, sampling pure "previous season". Fix: `blend = s.day === 0 ? 1 : …` — the world's first day is pure spring (22 atmosphere tests green after).
+- **Sun-path math, first cut, distorted elevations** (z-compression + normalization): rebuilt `bodyDir` as a proper unit-vector arc so `asin(y)` reads back exactly; palette elevation bands stay calibrated.
+- **Harness self-inflicted near-misses** (caught by probe-before-run): the night-sight test's fire threat sat beyond the 12-cell `ALARM_RADIUS` (moved to 10 cells); the strike flash lives on the viz field until the next frame (added `flashLevel` getter); the column-scan helper had a dead water check + stray `break` (rewritten top-down).
+- **Zenith-color harness check compared 09:00 vs noon** — both already at the full-day palette, so "no change" was correct behavior. The check now compares dawn against noon (probe-verified: dawn elev 0.15 → noon 0.95, different zenith hexes).
+
+### Verification lessons (for future sessions)
+
+- **Check `ps aux --sort=-%cpu` before diagnosing anything slow or flaky** — this session lost a full harness run and nearly misread an FPS probe to two orphaned vite-node probe processes spinning on the pre-fix `syncTo` loop (~40 min of both cores at load 5–7; "old build ≈ new build ≈ 3 fps" was both-starved, not a regression). `timeout` doesn't kill orphaned children; sweep for stragglers after every killed command.
+- A "fix" that changes what a check compares (dawn vs noon) can reveal the check itself was vacuous — probe the two endpoints in-page before re-running a 5-minute suite.
+- When injecting a clock into a sim, every harness section that fast-forwards "NPC time" must go through the injector — raw field pokes are now (correctly) overwritten every tick.
+
+### Deferred deliberately
+
+- **Two consecutive clean full harness runs** (Phase 16 section 8/8 + zero page errors + Phase 15 still 8/8) — the pre-fix run was 7/8 with the failures since fixed and probe-verified; the re-runs are the only unverified claim. **Tracked in HANDOFF as pending heavy work** (user asked to defer long/heavy runs on this VM).
+- Benchmark re-runs on an idle machine (numbers recorded under load; noted in docs/performance.md).
+- Rain → fluid accumulation (puddles/lakes/snow cover), wind → fire coupling — the Phase 9/10 deferred couplings (known-issues).
+- Snow accumulation / seasonal vegetation (seasons are sun/temp/color only); humidity (not modeled).
+- Volumetric clouds/fog, cloud shadows, scattering-based sky, per-region climate — research track.
+
+### Tests
+
+- Unit tests: 401 passed (31 files; +22 atmosphere)
+- Integration: headless browser suite — Phase 16 section ran once pre-fix (7/8; fixed + probe-verified since); **two clean confirmation runs deferred** (see above); zero page errors in that run; manual GUI pass pending (user)
+- Typecheck: clean (strict) · Lint: clean · Prettier: clean · Build: succeeds (three.js chunk unchanged)
+
+### Benchmarks
+
+- Atmosphere: GATE tick 0.025 ms mean; syncTo full year 0.010 ms; fire 256-cell tick 2.67 ms clear / 4.45 ms storm — `docs/performance.md` (loaded-VM caveat)
+- FPS: sky dome + precip are per-frame shader/pool work measured only in-page (harness re-runs pending); sim-side cost is the 0.025 ms tick
+
+### Architecture changes
+
+- New: `src/sim/atmosphere.ts` (pure — clock/weather/lightning/palette), `src/render/atmosphereViz.ts` + `src/render/rainfx.ts` (render), `tests/atmosphere.test.ts`, `benchmarks/atmosphere.bench.ts`.
+- `src/npc/npc.ts` re-exports clock constants from atmosphere (single source; old imports keep working); `NpcSimOptions` gains `clock`/`lightLevel`; `perception.canSee` gains an optional range.
+- `GameEvent.fireExtinguished.cause` gains `'rain'` (additive); `FireSim` gains `setRain`/`force`-ignite param + wet map (transient).
+- Save format untouched (v2): time/weather are transient; consequences (burn-outs, poured water) persist via the journal as before. No new materials.
+
+### Known issues
+
+- `docs/known-issues.md`: new "Atmosphere (Phase 16)" section — no voxel light field (lamps still glow-only), no rain accumulation, no wind→fire, lightning fires usually self-douse in rain, seasons sun/temp/color only, forceWeather purity break, palette-lerp sky, 2D fbm clouds, scalar temperature.
+
+### Next task
+
+- Task: Phase 17 — Visual Polish (plan §117), starting with the **voxel light field** (sunlight columns + lamp/fire block light, BFS like the fluid sim) — the highest-value item and the pay-off for the Phase 15/16 lamp/night groundwork.
+
+---
 
 ## Session 011 — 2026-09-11
 
@@ -1396,26 +1465,30 @@ _(Perception landed as Phase 13 (§111); the plan's Phase 12 scope was navigatio
 
 # Phase 16 — Weather and Atmosphere
 
-- [ ] Day/night cycle
-- [ ] Sun movement
-- [ ] Moon
-- [ ] Sky
-- [ ] Stars
-- [ ] Clouds
-- [ ] Rain
-- [ ] Heavy rain
-- [ ] Storm
-- [ ] Fog
-- [ ] Snow
-- [ ] Weather transitions
-- [ ] Wind
-- [ ] Temperature
-- [ ] Humidity
-- [ ] Seasons
+- [x] Day/night cycle _(clock: 100 ticks/hour, day ≈ 40 s real; drives NPC schedules + sky palette; HUD `HH:MM day N`)_
+- [x] Sun movement _(`bodyDir` azimuth arc, per-season max elevation; dawn→noon harness check)_
+- [x] Moon _(same path half a day off; night re-aims the voxel shader's sun term at it, faint blue)_
+- [x] Sky _(camera-following dome shader; palette zenith/horizon/fog lerps; clear noon = pre-atmosphere look)_
+- [x] Stars _(hash-scattered field, night × clear; midnight harness check)_
+- [x] Clouds _(3-octave fbm on the dome, scrolling with the wind; skipped at coverage ≤ 0.2 — SwiftShader)_
+- [x] Rain _(PrecipSystem streaks ∝ precip, wind-slanted; couples to fire — wetting/dousing)_
+- [x] Heavy rain _(storm profile; storm harness check douses a burning post with cause `rain`)_
+- [x] Storm _(lightning gate < 1/650/tick near the player: sky flash + thunder + force-ignited top cell)_
+- [x] Fog _(palette fog color + near/far pulled in by the weather fog profile; flash lifts fog color)_
+- [x] Snow _(winter precip renders as pooled slow flakes; particle fallback only — no accumulation)_
+- [x] Weather transitions _(segment fades 120–280 ticks, profiles blended per tick — smoothness unit-tested)_
+- [x] Wind _(cloud scroll + rain slant + NPC-irrelevant vector on the snapshot; no fire coupling — known-issues)_
+- [x] Temperature _(season×daylight scalar proxy on the snapshot; nothing consumes it yet beyond the snapshot)_
+- [ ] Humidity _(not modeled — known-issues)_
+- [x] Seasons _(8-day seasons on a 32-day year, blended over each season's first day; sun/daylight/temp blends)_
+
+### Milestone
+
+- [x] **Milestone 13 complete: The world has a living sky** _(met — clock + seasons drive the sun/moon/stars, the weather machine walks clear→storm with smooth transitions, rain fights fire both ways, lightning ignites, NPC schedules/sight follow the sun; limitations in `docs/known-issues.md` "Atmosphere (Phase 16)")_
 
 ---
 
-# Phase 16 — Rendering Polish
+# Phase 17 — Visual Polish
 
 - [ ] Improve voxel materials
 - [ ] Procedural micro-detail
@@ -1435,7 +1508,7 @@ _(Perception landed as Phase 13 (§111); the plan's Phase 12 scope was navigatio
 
 ---
 
-# Phase 17 — Audio
+# Phase 17 — Audio (part of Visual Polish, plan §117)
 
 - [ ] Audio manager
 - [ ] Sound event bus integration

@@ -1,4 +1,4 @@
-import { worldToChunk } from './coordinates';
+import { worldToChunk, WORLD_HEIGHT } from './coordinates';
 import { packCellKey, unpackCellKey } from './fluid';
 import { AIR, fireProfileOf, isOpaque, WATER } from './materials';
 import type { World } from './world';
@@ -21,12 +21,16 @@ import type { GameEvent } from '../sim/events';
  *
  * Rules per active cell, integer math, fixed neighbor order:
  * 1. Burning cell next to water → extinguished (cause `water`).
- * 2. Burning cell with all six neighbors opaque → smothered (no air).
- * 3. Burning cell with fuel ≤ 1 burns out: the voxel becomes AIR (real
+ * 2. Burning cell in falling weather with an open sky (Phase 16) soaks
+ *    toward `WET_THRESHOLD` and is extinguished (cause `rain`); roofed
+ *    cells dry out instead, exposed heat cools twice as fast, and new
+ *    exposed ignition is refused while any rain falls.
+ * 3. Burning cell with all six neighbors opaque → smothered (no air).
+ * 4. Burning cell with fuel ≤ 1 burns out: the voxel becomes AIR (real
  *    world write — journaled, remeshed, visible to the fluid sim).
- * 4. Otherwise fuel decreases and heat is deposited into each flammable
+ * 5. Otherwise fuel decreases and heat is deposited into each flammable
  *    non-burning neighbor.
- * 5. Non-burning cell whose heat reaches `ignitionHeat(flammability)`
+ * 6. Non-burning cell whose heat reaches `ignitionHeat(flammability)`
  *    ignites with its material's burn duration.
  *
  * Determinism (ADR-005): no RNG anywhere — the same edit/tick sequence
@@ -52,6 +56,12 @@ export const HEAT_DECAY = 1;
 export const IGNITION_BASE = 12;
 /** Heat an explosion dumps on each flammable cell at the crater rim. */
 export const BLAST_HEAT = 8;
+/**
+ * Wetness (ticks of full-rain exposure) that douses a burning cell —
+ * Phase 16 weather coupling. At half rain it takes twice as long, and
+ * a roofed fire never accumulates wetness at all.
+ */
+export const WET_THRESHOLD = 60;
 
 /** Default per-tick cell budget (main.ts passes its own tuned value). */
 export const DEFAULT_FIRE_BUDGET = 256;
@@ -62,6 +72,7 @@ export function ignitionHeat(flammability: number): number {
 }
 
 export type FireEvent = Extract<GameEvent, { type: 'fireIgnited' | 'fireExtinguished' }>;
+type ExtinguishCause = Extract<GameEvent, { type: 'fireExtinguished' }>['cause'];
 
 /** Fixed 6-neighbor order — part of the determinism contract. */
 const NEIGHBORS: readonly (readonly [number, number, number])[] = [
@@ -93,8 +104,12 @@ export class FireSim {
   private readonly burning = new Map<number, number>();
   /** Packed cell key → accumulated heat (flammable cells only). */
   private readonly heat = new Map<number, number>();
+  /** Packed cell key → rain wetness (burning cells, while it rains). */
+  private readonly wet = new Map<number, number>();
   /** Cells to simulate, insertion-ordered; packed keys. */
   private readonly active = new Set<number>();
+  /** Precipitation intensity 0–1 (Phase 16 weather coupling). */
+  private rain = 0;
   private dirty = false;
 
   /** Wired by main to the game event bus (pure core stays bus-agnostic). */
@@ -110,8 +125,23 @@ export class FireSim {
       // Any external write (edit, undo, fluid, collapse) resets the cell's
       // fire state — fresh material starts cold — and re-evaluates the spot.
       if (this.burning.delete(key) || this.heat.delete(key)) this.dirty = true;
+      this.wet.delete(key);
       this.activate(x, y, z);
     };
+  }
+
+  /**
+   * Current precipitation (Phase 16): while it rains, cells open to the
+   * sky soak toward `WET_THRESHOLD` and go out (cause `rain`), roofed
+   * fires are safe, exposed heat cools faster, and new exposed ignition
+   * is refused. main feeds this from the atmosphere every fixed step.
+   */
+  setRain(intensity: number): void {
+    this.rain = Math.max(0, Math.min(1, intensity));
+  }
+
+  get rainLevel(): number {
+    return this.rain;
   }
 
   /** Cells waiting to simulate (HUD/debug). */
@@ -145,17 +175,21 @@ export class FireSim {
   }
 
   /**
-   * Ignite one cell directly (creator tool). Refuses non-flammable cells,
-   * cells already burning, and anything touching water. Returns whether
-   * the cell caught.
+   * Ignite one cell directly (creator tool, lightning). Refuses
+   * non-flammable cells, cells already burning, and anything touching
+   * water. `force` overrules the rain refusal (lightning is hotter
+   * than weather); returns whether the cell caught.
    */
-  ignite(x: number, y: number, z: number): boolean {
+  ignite(x: number, y: number, z: number, force = false): boolean {
     if (!inKeyRange(x, y, z) || !this.isLoaded(x, y, z)) return false;
     const key = packCellKey(x, y, z);
     if (this.burning.has(key)) return true;
     const profile = fireProfileOf(this.world.getVoxel(x, y, z));
     if (profile.flammability <= 0 || profile.burnDuration <= 0) return false;
     if (this.hasWaterNeighbor(x, y, z)) return false;
+    // Rain beating down on an exposed spot refuses to light (Phase 16);
+    // sheltered cells light as usual.
+    if (!force && this.rain > 0 && this.isSkyExposed(x, y, z)) return false;
     this.igniteCell(x, y, z, key, profile.burnDuration);
     return true;
   }
@@ -219,10 +253,17 @@ export class FireSim {
   }
 
   /** Full sim state for determinism tests and debug tooling. */
-  exportState(): { burning: [number, number][]; heat: [number, number][] } {
+  exportState(): {
+    burning: [number, number][];
+    heat: [number, number][];
+    wet: [number, number][];
+    rain: number;
+  } {
     return {
       burning: [...this.burning.entries()].sort((a, b) => a[0] - b[0]),
       heat: [...this.heat.entries()].sort((a, b) => a[0] - b[0]),
+      wet: [...this.wet.entries()].sort((a, b) => a[0] - b[0]),
+      rain: this.rain,
     };
   }
 
@@ -230,7 +271,9 @@ export class FireSim {
   reset(): void {
     this.burning.clear();
     this.heat.clear();
+    this.wet.clear();
     this.active.clear();
+    this.rain = 0;
     this.dirty = false;
   }
 
@@ -252,15 +295,10 @@ export class FireSim {
     this.onEvent?.({ type: 'fireIgnited', x, y, z });
   }
 
-  private extinguish(
-    x: number,
-    y: number,
-    z: number,
-    key: number,
-    cause: 'water' | 'smothered',
-  ): void {
+  private extinguish(x: number, y: number, z: number, key: number, cause: ExtinguishCause): void {
     this.burning.delete(key);
     this.heat.delete(key);
+    this.wet.delete(key);
     this.onEvent?.({ type: 'fireExtinguished', x, y, z, cause });
   }
 
@@ -268,6 +306,7 @@ export class FireSim {
   private burnOut(x: number, y: number, z: number, key: number): void {
     this.burning.delete(key);
     this.heat.delete(key);
+    this.wet.delete(key);
     this.world.setVoxel(x, y, z, AIR);
     this.activateAround(x, y, z);
     this.dirty = true;
@@ -319,6 +358,7 @@ export class FireSim {
         this.extinguish(x, y, z, key, 'water');
         return;
       }
+      if (this.rain > 0 && this.stepRain(x, y, z, key)) return; // doused
       if (this.isFullyEnclosed(x, y, z)) {
         this.extinguish(x, y, z, key, 'smothered');
         return;
@@ -347,12 +387,45 @@ export class FireSim {
       return;
     }
     if (h > 0) {
-      const next = h - HEAT_DECAY;
+      // Rain cools exposed embers: they shed heat twice as fast.
+      const decay = this.rain > 0 && this.isSkyExposed(x, y, z) ? HEAT_DECAY * 2 : HEAT_DECAY;
+      const next = h - decay;
       if (next <= 0) this.heat.delete(key);
       else {
         this.heat.set(key, next);
         this.active.add(key); // keep decaying
       }
     }
+  }
+
+  /**
+   * One tick of rain on a burning cell: exposed cells soak toward the
+   * wet threshold (then douse, cause `rain`), roofed cells dry out.
+   * Returns true when the fire went out. Deterministic — no RNG, just
+   * accumulated wetness from the (deterministic) weather.
+   */
+  private stepRain(x: number, y: number, z: number, key: number): boolean {
+    if (this.isSkyExposed(x, y, z)) {
+      const wet = (this.wet.get(key) ?? 0) + this.rain;
+      if (wet >= WET_THRESHOLD) {
+        this.extinguish(x, y, z, key, 'rain');
+        return true;
+      }
+      this.wet.set(key, wet);
+    } else {
+      const wet = (this.wet.get(key) ?? 0) - this.rain * 0.5;
+      if (wet <= 0) this.wet.delete(key);
+      else this.wet.set(key, wet);
+    }
+    return false;
+  }
+
+  /** True when nothing but air/water stands above the cell — rain lands. */
+  private isSkyExposed(x: number, y: number, z: number): boolean {
+    for (let sy = y + 1; sy < WORLD_HEIGHT; sy++) {
+      const m = this.world.getVoxel(x, sy, z);
+      if (m !== AIR && m !== WATER) return false;
+    }
+    return true;
   }
 }

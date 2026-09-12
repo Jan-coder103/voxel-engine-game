@@ -4,8 +4,13 @@ import { hash3 } from '../voxel/terrain';
 import { WORLD_HEIGHT } from '../voxel/coordinates';
 import type { GameEvent } from '../sim/events';
 import {
+  DAY_TICKS as ATMOS_DAY_TICKS,
+  TICKS_PER_HOUR as ATMOS_TICKS_PER_HOUR,
+} from '../sim/atmosphere';
+import {
   canSee,
   hasLineOfSight,
+  SIGHT_DISTANCE,
   ThreatBoard,
   type Point3,
   type ThreatKind,
@@ -46,9 +51,9 @@ import {
  *   tests/debug until an economy lands.
  * - Population is transient and never saved: figures spawn and despawn
  *   around the player deterministically (hash-scattered rings), so a
- *   reloaded world repopulates identically. The schedule "clock" is a
- *   tick counter, not real time; the Phase 15/16 weather cycle will
- *   become its source.
+ *   reloaded world repopulates identically. The schedule reads the
+ *   atmosphere's world clock when main injects one (Phase 16); without
+ *   it the sim counts its own ticks (tests, standalone use).
  *
  * Pure: no three.js, no DOM (ADR-002). No sequential RNG — every
  * "random" choice hashes (npc id, salt, tick, world seed), so the same
@@ -101,9 +106,11 @@ export const FLEE_SPEED_MULT = 1.6;
 /** Ticks between a figure's perception scans, staggered by id. */
 export const SCAN_PERIOD = 10;
 
-/** Schedule clock: 100 ticks per game hour, 2400 per day (40 s real time). */
-export const TICKS_PER_HOUR = 100;
-export const DAY_TICKS = TICKS_PER_HOUR * 24;
+/** Schedule clock: 100 ticks per game hour, 2400 per day (40 s real time).
+ * The constants live in the atmosphere module (Phase 16) — the world
+ * clock — and are re-exported here for the sim's existing consumers. */
+export const TICKS_PER_HOUR = ATMOS_TICKS_PER_HOUR;
+export const DAY_TICKS = ATMOS_DAY_TICKS;
 const SLEEP_START_HOUR = 22;
 const SLEEP_END_HOUR = 6;
 const WORK_START_HOUR = 9;
@@ -172,6 +179,17 @@ export interface NpcSimOptions {
    * — figures appear on streets and open ground, not on structures.
    */
   groundY?: (x: number, z: number) => number;
+  /**
+   * World clock (Phase 16): returns the atmosphere's tick counter, so
+   * the schedule follows the real day/night cycle instead of this sim's
+   * private count. When omitted the sim keeps its own clock (tests).
+   */
+  clock?: () => number;
+  /**
+   * Scene light 0–1 (Phase 16): night shrinks sight range — figures
+   * see roughly a third as far by moonlight as at noon. Defaults to 1.
+   */
+  lightLevel?: () => number;
 }
 
 export class NpcSim {
@@ -258,11 +276,13 @@ export class NpcSim {
     }
   }
 
-  /** Forget all figures, the clock, and every threat memory (reset/load). */
+  /** Forget all figures, the clock, and every threat memory (reset/load).
+   * With an injected world clock the clock itself survives — time is the
+   * atmosphere's, not the population's. */
   reset(): void {
     this.npcs.length = 0;
     this.threats.clear();
-    this.timeTicks = 8 * TICKS_PER_HOUR;
+    this.timeTicks = this.options.clock ? this.options.clock() : 8 * TICKS_PER_HOUR;
     this.tickCount = 0;
   }
 
@@ -272,7 +292,9 @@ export class NpcSim {
    * around `center` (the player).
    */
   tick(center: { x: number; z: number }): void {
-    this.timeTicks++;
+    // The world clock (atmosphere) drives the schedule when injected;
+    // otherwise the sim counts its own ticks (standalone tests).
+    this.timeTicks = this.options.clock ? this.options.clock() : this.timeTicks + 1;
     this.tickCount++;
     const hour = this.hourOfDay();
     let decideBudget = DECIDES_PER_TICK;
@@ -535,10 +557,17 @@ export class NpcSim {
         continue;
       }
       if (d > ALARM_RADIUS) continue; // visible but too far to scare
-      if (!canSee((x, y, z) => this.materialAt(x, y, z), eye, npc.yaw, threat)) continue;
+      if (!canSee((x, y, z) => this.materialAt(x, y, z), eye, npc.yaw, threat, this.sightRange()))
+        continue;
       npc.fear = Math.min(100, npc.fear + FEAR_ON_SIGHT[threat.kind]);
       if (npc.fear >= PANIC_THRESHOLD) this.startFlee(npc);
     }
+  }
+
+  /** Sight range shrinks with scene light: moonlight sees ~⅓ as far. */
+  private sightRange(): number {
+    const light = this.options.lightLevel?.() ?? 1;
+    return SIGHT_DISTANCE * (0.35 + 0.65 * light);
   }
 
   /** Panic: drop everything and run (sleep included). Idempotent mid-run. */
