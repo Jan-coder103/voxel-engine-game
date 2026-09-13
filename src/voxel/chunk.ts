@@ -9,10 +9,20 @@ import type { VoxelData } from './voxelVolume';
  * voxel data changed since the last mesh build (set by edits and by
  * generation of neighbors — boundary faces need remeshing when a
  * neighbor appears).
+ *
+ * Light storage (Phase 17): the light field keeps one byte per voxel for
+ * each channel (sky 0–15, block 0–15) on the chunk, allocated lazily by
+ * the LightField when the chunk is initialized — so unloading a chunk
+ * frees its light with it, and chunks the light field has never touched
+ * render with the "full sky" default.
  */
 export class Chunk {
   readonly volume: VoxelData = new PackedVolume(CHUNK_SIZE);
   dirty = true;
+  /** Per-voxel sky light 0–15 (index layout = volume index), when initialized. */
+  lightSky?: Uint8Array;
+  /** Per-voxel block light 0–15 (index layout = volume index), when initialized. */
+  lightBlock?: Uint8Array;
 
   constructor(readonly coord: ChunkCoordinate) {}
 

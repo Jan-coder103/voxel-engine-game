@@ -4,6 +4,82 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.15.0] — 2026-09-13 — Phase 17 (Light: the voxel light field)
+
+### Added
+
+- **Voxel light field** (`src/voxel/light.ts`, pure): two per-voxel
+  channels, Minecraft-shaped. **Sky light** 0–15 — full column above ⇒
+  15, free straight-down propagation through air, −1 lateral steps,
+  water −2 / glass −1 (leaves block: tree shade; roofs: dark rooms).
+  **Block light** 0–15 from point sources — lit lamps follow the power
+  sim's lit set and burning cells the fire sim's (main diffs both into
+  idempotent `setSource` calls, gated on power revision / burning
+  count); self-luminous machines via a derived `MATERIAL_EMISSION`
+  table (generators glow). Storage is two lazily-allocated `Uint8Array`s
+  per chunk (unloading frees it); uninitialized chunks read as full sky
+  so streaming never renders dark.
+- **Incremental two-queue BFS** on the World hooks, budgeted 1200
+  pops/tick (fluid-sim pattern): voxel changes remove stale light
+  (free-fall cascade down sky columns, brighter borders re-seeded),
+  re-walk the edited column, re-add from seeds; chunk generation fills
+  columns directly, seeds borders, column breaks, and the lit-boundary
+  pass (any lit cell bordering a dimmer transparent cell) so
+  streaming-order-independence holds. Light changes mark chunks mesh
+  dirty — remeshing rides the existing frame budget. Property-tested:
+  incremental ≡ from-scratch field after 60 random edits on both
+  channels.
+- **Mesher light + AO**: `meshVolumeGreedy` samples the packed light at
+  each face's air cell (part of the merge signature — quads never smear
+  bright into dark) and emits classic 3-sample per-corner vertex AO for
+  opaque passes, as `aLight` (vec2) / `aAO` (float) vertex attributes.
+  Face set unchanged — greedy↔naive equivalence tests untouched.
+- **Shader**: sky access modulates the outdoor terms
+  (`(ambient + sun) × sky × ao`, 0.05 floor keeps caves readable) and a
+  warm `uBlockColor` term carries lamp/fire light. Lamps finally
+  illuminate the streets at night; fire lights its surroundings; the
+  Phase 15 glow shells get a real light source behind them.
+- **Tests**: 19 new (420 total, 32 files) — sky columns/shafts,
+  overhang shading, water/glass attenuation, source
+  add/remove/occlude/combine, static emission (placed + generated),
+  cross-chunk flow, uninitialized default, incremental ≡ recompute
+  gold test, determinism, budget, mesher light/AO attributes +
+  signature splits.
+- **Benchmarks** (`benchmarks/light.bench.ts`): town-chunk arrival
+  ≈ 13 ms (generate + init + settle), settled incremental street edit
+  ≈ 178 ms of BFS total (budgeted < 1 ms/tick in game), 100-lamp fill
+  ≈ 443 ms progressive, mesher light+AO delta +7% (3.42 → 3.67 ms).
+  Baselines in `docs/performance.md`.
+- **Harness** (`.verify/run.mjs`): Phase 17 section (5 checks: sky
+  columns, night lamp light, roofed-room dark + relight, fire light,
+  clock restore) — written and `node --check`ed this session; **runs
+  deferred** under the VM-load policy (see HANDOFF).
+- **Debug hook**: `__mw.light` (the field: `skyAt`/`blockLightAt`/
+  `packedAt`/`setSource`/`pendingCount`), `__mw.skyAt`/`blockLightAt`
+  shorthands, and `__mw.scene` (render-side probes).
+
+### Fixed
+
+- **Stale removal entries could permanently dim re-lit columns** (found
+  by the gold property test): a removal entry queued before a column
+  walk re-set the cell's sky 15 cascaded later and killed the fresh
+  value (refilled laterally at −1 per step). Removal pops now re-check
+  the cell's current level and re-seed instead of cascading when the
+  removal went stale.
+- **Cross-chunk column blockers leaked phantom sky light at streaming
+  order boundaries** (gold test): a chunk generating above/beside
+  initialized chunks demotes the topmost orphaned 15 below new blockers
+  (the cascade eats the column downward) and the lit-boundary pass
+  feeds shadows beside its open columns.
+
+### Changed
+
+- Save format untouched (v2): light is derived state — loads
+  `reset()` + `rescan()` and re-sync lamp/fire sources.
+- `Chunk` carries optional `lightSky`/`lightBlock` arrays; `MeshData`
+  gained optional `light`/`ao` arrays; the voxel shader grew the
+  `aLight`/`aAO` attributes and the `uBlockColor` uniform.
+
 ## [0.14.0] — 2026-09-13 — Phase 16 (Atmosphere)
 
 ### Added

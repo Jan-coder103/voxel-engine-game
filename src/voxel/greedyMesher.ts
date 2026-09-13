@@ -31,6 +31,17 @@ import type { ChunkMesh, MeshData, VoxelQuery } from './mesher';
  * exactly as before, keeping lakes cheap. The emitted face SET is
  * unchanged (positions stay unit-cube); the attribute is additive, which
  * keeps the greedy↔naive equivalence tests meaningful.
+ *
+ * Light + ambient occlusion (Phase 17): the optional `light` query
+ * reports a cell's packed light (`sky << 4 | block`) and each face
+ * samples it at the cell the face looks into — light is part of the
+ * merge signature, so quads never smear bright into dark. Each quad
+ * corner also gets a classic 3-sample vertex AO (two edge neighbors +
+ * the diagonal in the face plane, around that corner's air cell), so
+ * corners darken where geometry folds. AO is sampled per quad corner,
+ * not per unit face — merging stays maximal and open terrain (uniform
+ * light, uniform AO) still merges into huge quads. Both attributes are
+ * additive outputs; the face set is unchanged.
  */
 
 /** True if `m` shows a face against `neighbor` (naive-mesher rules). */
@@ -68,6 +79,12 @@ class FloatBuf {
     this.buf[this.len++] = a;
     this.buf[this.len++] = b;
     this.buf[this.len++] = c;
+  }
+
+  push2(a: number, b: number): void {
+    if (this.len + 2 > this.buf.length) this.grow();
+    this.buf[this.len++] = a;
+    this.buf[this.len++] = b;
   }
 
   push(v: number): void {
@@ -127,11 +144,42 @@ class ValueBuf<T extends Uint16Array | Uint32Array> {
   }
 }
 
+// Scratch for vertexAO (module-level to keep the hot loop alloc-free).
+const p1 = [0, 0, 0];
+const p2 = [0, 0, 0];
+const p3 = [0, 0, 0];
+
+/** Classic 3-sample vertex AO: occupancy of the two edge neighbors and
+ * the diagonal around the air cell (the cell the face looks into),
+ * offset one step along u/v toward the corner. 3 = open corner, 0 = a
+ * fully folded corner (both edges solid). */
+function vertexAO(
+  voxelAt: VoxelQuery,
+  air: number[],
+  u: number,
+  v: number,
+  su: number,
+  sv: number,
+): number {
+  p1[0] = p2[0] = p3[0] = air[0];
+  p1[1] = p2[1] = p3[1] = air[1];
+  p1[2] = p2[2] = p3[2] = air[2];
+  p1[u] += su;
+  p2[v] += sv;
+  p3[u] += su;
+  p3[v] += sv;
+  const side1 = isOpaque(voxelAt(p1[0], p1[1], p1[2])) ? 1 : 0;
+  const side2 = isOpaque(voxelAt(p2[0], p2[1], p2[2])) ? 1 : 0;
+  const corner = isOpaque(voxelAt(p3[0], p3[1], p3[2])) ? 1 : 0;
+  return side1 !== 0 && side2 !== 0 ? 0 : 3 - (side1 + side2 + corner);
+}
+
 /** Extract an outward-facing culled mesh, merging coplanar faces. */
 export function meshVolumeGreedy(
   volume: VoxelData,
   query: VoxelQuery,
   waterLevel?: (x: number, y: number, z: number) => number,
+  light?: (x: number, y: number, z: number) => number,
 ): ChunkMesh {
   const size = volume.size;
   const voxelAt: VoxelQuery = (x, y, z) =>
@@ -142,6 +190,8 @@ export function meshVolumeGreedy(
     normals: new FloatBuf(),
     materialIds: new ValueBuf<Uint16Array>(new Uint16Array(256)),
     indices: new ValueBuf<Uint32Array>(new Uint32Array(256)),
+    light: new FloatBuf(),
+    ao: new FloatBuf(),
   };
   const water = {
     positions: new FloatBuf(),
@@ -149,18 +199,23 @@ export function meshVolumeGreedy(
     materialIds: new ValueBuf<Uint16Array>(new Uint16Array(64)),
     indices: new ValueBuf<Uint32Array>(new Uint32Array(64)),
     drops: new FloatBuf(),
+    light: new FloatBuf(),
   };
 
   // Reused per-slice face masks: which material emits at this in-plane
   // cell, toward +d (1) or -d (-1), plus the water merge signature
-  // (0 for opaque faces and submerged water); 0 = no face (AIR is id 0,
-  // so the sentinel doubles as the air material value).
+  // (0 for opaque faces and submerged water) and the packed light of the
+  // cell the face looks into (0 when no light query); 0 material = no
+  // face (AIR is id 0, so the sentinel doubles as the air material value).
   const maskMaterial = new Int16Array(size * size);
   const maskDir = new Int8Array(size * size);
   const maskAux = new Int16Array(size * size);
+  const maskLight = new Int16Array(size * size);
 
   const x = [0, 0, 0];
   const q = [0, 0, 0];
+  const air = [0, 0, 0];
+  const ao = [0, 0, 0, 0];
 
   for (let d = 0; d < 3; d++) {
     const u = (d + 1) % 3;
@@ -184,14 +239,27 @@ export function meshVolumeGreedy(
             maskMaterial[n] = a;
             maskDir[n] = 1;
             maskAux[n] = faceAux(a, x[0], x[1], x[2], voxelAt, waterLevel);
+            if (light) {
+              air[0] = x[0] + q[0];
+              air[1] = x[1] + q[1];
+              air[2] = x[2] + q[2];
+              maskLight[n] = light(air[0], air[1], air[2]);
+            }
           } else if (bInside && emits(b, a)) {
             maskMaterial[n] = b;
             maskDir[n] = -1;
             maskAux[n] = faceAux(b, x[0] + q[0], x[1] + q[1], x[2] + q[2], voxelAt, waterLevel);
+            if (light) {
+              air[0] = x[0];
+              air[1] = x[1];
+              air[2] = x[2];
+              maskLight[n] = light(air[0], air[1], air[2]);
+            }
           } else {
             maskMaterial[n] = 0;
             maskDir[n] = 0;
             maskAux[n] = 0;
+            if (light) maskLight[n] = 0;
           }
         }
       }
@@ -207,13 +275,15 @@ export function meshVolumeGreedy(
           }
           const dir = maskDir[idx];
           const aux = maskAux[idx];
+          const faceLight = light ? maskLight[idx] : -1;
 
           let width = 1;
           while (
             i + width < size &&
             maskMaterial[idx + width] === material &&
             maskDir[idx + width] === dir &&
-            maskAux[idx + width] === aux
+            maskAux[idx + width] === aux &&
+            (!light || maskLight[idx + width] === faceLight)
           ) {
             width++;
           }
@@ -224,12 +294,29 @@ export function meshVolumeGreedy(
               if (
                 maskMaterial[below] !== material ||
                 maskDir[below] !== dir ||
-                maskAux[below] !== aux
+                maskAux[below] !== aux ||
+                (light && maskLight[below] !== faceLight)
               ) {
                 break grow;
               }
             }
             height++;
+          }
+
+          // Per-corner vertex AO around each corner's own air cell
+          // (opaque pass only — water shades uniformly). Corners in the
+          // same order emitQuad pushes them: c0, c1, c2, c3.
+          let hasAO = false;
+          if (light && material !== WATER) {
+            hasAO = true;
+            air[d] = dir > 0 ? x[d] + 1 : x[d];
+            for (let ci = 0; ci < 4; ci++) {
+              const highU = ci === 1 || ci === 3;
+              const highV = ci >= 2;
+              air[u] = i + (highU ? width - 1 : 0);
+              air[v] = j + (highV ? height - 1 : 0);
+              ao[ci] = vertexAO(voxelAt, air, u, v, highU ? 1 : -1, highV ? 1 : -1);
+            }
           }
 
           emitQuad(
@@ -245,6 +332,8 @@ export function meshVolumeGreedy(
             dir,
             material,
             aux,
+            faceLight,
+            hasAO ? ao : undefined,
           );
 
           for (let l = 0; l < height; l++) {
@@ -256,9 +345,15 @@ export function meshVolumeGreedy(
     }
   }
 
+  if (!light) {
+    return {
+      opaque: toMeshData(opaque),
+      water: toMeshData(water, (buffers) => (buffers as typeof water).drops.toTypedArray()),
+    };
+  }
   return {
-    opaque: toMeshData(opaque),
-    water: toMeshData(water, (buffers) => (buffers as typeof water).drops.toTypedArray()),
+    opaque: toMeshData(opaque, undefined, true),
+    water: toMeshData(water, (buffers) => (buffers as typeof water).drops.toTypedArray(), true),
   };
 }
 
@@ -287,6 +382,12 @@ function faceAux(
  * (255 − level) / 255 — the shader sinks them — except on −Y faces
  * (undersides stay square). Merged quads share one signature, so every
  * dropped vertex sinks by the same amount.
+ *
+ * `faceLight` is the packed light (`sky << 4 | block`, −1 = no query) of
+ * the cell the face looks into, identical across the merged quad — every
+ * vertex gets the same unpacked `aLight` pair. `ao` carries the four
+ * corner AO levels (0–3, c0/c1/c2/c3 order); vertices receive them in
+ * the emitted corner order (the −d facing swaps c1/c2) as `aAO`.
  */
 function emitQuad(
   buffers: {
@@ -295,6 +396,8 @@ function emitQuad(
     materialIds: ValueBuf<Uint16Array>;
     indices: ValueBuf<Uint32Array>;
     drops?: FloatBuf;
+    light?: FloatBuf;
+    ao?: FloatBuf;
   },
   d: number,
   u: number,
@@ -307,6 +410,8 @@ function emitQuad(
   dir: number,
   material: VoxelMaterialID,
   aux = 0,
+  faceLight = -1,
+  ao?: number[],
 ): void {
   const c0 = [0, 0, 0];
   const c1 = [0, 0, 0];
@@ -332,17 +437,27 @@ function emitQuad(
   const topY = Math.max(c0[1], c1[1], c2[1], c3[1]);
 
   // One index pattern serves both facings: for -d the reordered corner
-  // list reverses the winding of both triangles.
+  // list reverses the winding of both triangles. AO follows the same
+  // reordering (c0/c1/c2/c3 levels → emitted corner order).
   const base = buffers.materialIds.length;
   const corners = dir > 0 ? [c0, c1, c2, c3] : [c0, c2, c1, c3];
-  for (const [cx, cy, cz] of corners) {
+  const aoOrder = dir > 0 ? [0, 1, 2, 3] : [0, 2, 1, 3];
+  const sky = faceLight >= 0 ? (faceLight >> 4) / LIGHT_SCALE : 0;
+  const block = faceLight >= 0 ? (faceLight & 0xf) / LIGHT_SCALE : 0;
+  for (let vi = 0; vi < 4; vi++) {
+    const [cx, cy, cz] = corners[vi];
     buffers.positions.push3(cx, cy, cz);
     buffers.normals.push3(normal[0], normal[1], normal[2]);
     buffers.materialIds.push(material);
     buffers.drops?.push(drop > 0 && cy === topY ? drop : 0);
+    if (buffers.light && faceLight >= 0) buffers.light.push2(sky, block);
+    if (buffers.ao && ao) buffers.ao.push(ao[aoOrder[vi]] / 3);
   }
   buffers.indices.pushAll(base, base + 1, base + 2, base + 2, base + 1, base + 3);
 }
+
+/** Light levels are 0–15; attributes are normalized by this. */
+const LIGHT_SCALE = 15;
 
 function toMeshData(
   buffers: {
@@ -351,6 +466,8 @@ function toMeshData(
     materialIds: ValueBuf<Uint16Array>;
     indices: ValueBuf<Uint32Array>;
     drops?: FloatBuf;
+    light?: FloatBuf;
+    ao?: FloatBuf;
   },
   extractDrops?: (buffers: {
     positions: FloatBuf;
@@ -358,7 +475,10 @@ function toMeshData(
     materialIds: ValueBuf<Uint16Array>;
     indices: ValueBuf<Uint32Array>;
     drops?: FloatBuf;
+    light?: FloatBuf;
+    ao?: FloatBuf;
   }) => Float32Array,
+  withLight = false,
 ): MeshData {
   return {
     positions: buffers.positions.toTypedArray(),
@@ -367,5 +487,11 @@ function toMeshData(
     indices: buffers.indices.toTypedArray(),
     quadCount: buffers.materialIds.length / 4,
     ...(extractDrops ? { waterDrop: extractDrops(buffers) } : {}),
+    ...(withLight && buffers.light
+      ? {
+          light: buffers.light.toTypedArray(),
+          ...(buffers.ao ? { ao: buffers.ao.toTypedArray() } : {}),
+        }
+      : {}),
   };
 }

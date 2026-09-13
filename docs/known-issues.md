@@ -294,12 +294,11 @@ milestone goes here before it goes to the backlog.
 
 ## Atmosphere (Phase 16)
 
-- **No voxel light field yet — lamps still don't illuminate.** Night is
-  palette-ambient only (the voxel shader's sun term re-aims at the moon
-  with a faint tint); lit lamps keep their `powerViz` glow shells but
-  cast no light on the street. The sky reads correctly; the ground
-  barely changes. The light field (sunlight columns + lamp/fire sources,
-  BFS like the fluid sim) is the Phase 17 lighting pass.
+- **~~No voxel light field yet — lamps still don't illuminate.~~**
+  Superseded in Phase 17: the light field landed and lit lamps cast real
+  block light (see "Lighting (Phase 17)"). Night is still
+  palette-ambient + moonlight outside lamp/fire reach, and NPC night
+  sight keeps using the daylight proxy rather than sampling the field.
 - **Rain does not accumulate.** Precip interacts with fire (wetting/
   dousing) but not with the fluid sim — no puddles, no rising lakes, no
   snow cover. The Phase 9 coupling (rain → `pour` at the surface) is
@@ -332,6 +331,47 @@ milestone goes here before it goes to the backlog.
 - **Temperature is a scalar proxy.** One global value per tick (season
   blend × daylight); no per-region climate, altitude lapse, or heat
   coupling to the fire sim's temperature accumulator.
+
+## Lighting (Phase 17)
+
+- **Light trails fire with a visible lag.** Burning cells become block
+  sources through main's count-gated resync, and the BFS drains under a
+  1200-pop/tick budget — a fast-spreading fire's light front lags a
+  second or two behind the flames (SwiftShader: several). The HUD's
+  `light qN` shows the backlog; a cell whose fire died before the BFS
+  arrives self-corrects (the source map is re-read per pop).
+- **Vertex AO is per quad corner, not per voxel.** A merged quad
+  samples AO at its four corner cells, so interior AO variation across
+  a wide quad (e.g. a long wall with a mid-pillar) is approximated by
+  the corner values. The classic quad-diagonal flip (fixes anisotropy
+  artifacts on corner gradients) is not implemented either.
+- **Light is flat per face.** The merge signature carries one
+  (sky, block) pair per face (sampled at the air cell it looks into) —
+  no smooth per-vertex light interpolation, so large lit/dark
+  boundaries are crisp rather than gradient-soft. AO supplies the soft
+  corners.
+- **Lamps are always on while powered.** The power sim has no time
+  awareness — the town grid lights lamps day and night, so daytime
+  lamp light pools (and glow shells) coexist with sunshine. A
+  day/night switch on the grid is a power-sim feature, not a lighting
+  one.
+- **Leaves and glass are the only interesting transparencies.** Glass
+  passes light at cost 1 (windows light interiors); water at 2 (pools
+  dim with depth); leaves block (tree shade). There is no partial
+  opacity for any other material, and light ignores fluid _flow_
+  (flowing water attenuates like a source block).
+- **Uninitialized chunks read as full sky.** The mesher default keeps
+  streaming from rendering black, but a chunk whose columns are all
+  cave (never open to the sky) renders bright for the ticks before its
+  light initializes. Chunk init is synchronous with generation, so the
+  window is only the BFS settle time.
+- **No NPC/coupling consumers yet.** NPC night sight still uses the
+  atmosphere daylight proxy (not the local field), fire's rain wetting
+  still uses its own sky scan (not sky light), and the inspector shows
+  no light values — all cheap follow-ups now that the field exists.
+- **Save format untouched.** Light is derived state like the utility
+  networks: loads `reset()` + `rescan()` the field and re-sync lamp and
+  fire sources from the sims.
 
 ## GUI verification (headless)
 

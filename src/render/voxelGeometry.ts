@@ -7,7 +7,9 @@ import type { MeshData } from '../voxel/mesher';
  * `voxelSize` bakes LOD scaling into positions (LOD1 = 2 so one mesh
  * voxel spans 2 world voxels). Color/material lookups happen in the voxel
  * shader (voxelMaterial.ts). The optional `waterDrop` attribute (flow
- * height) is bound when the mesher produced one.
+ * height) is bound when the mesher produced one; `aLight` (sky/block
+ * pairs) and `aAO` (corner occlusion) come from the light-aware greedy
+ * mesher and drive the shader's per-vertex light terms (Phase 17).
  */
 
 export function buildVoxelGeometry(mesh: MeshData, voxelSize = 1): THREE.BufferGeometry {
@@ -21,6 +23,12 @@ export function buildVoxelGeometry(mesh: MeshData, voxelSize = 1): THREE.BufferG
   );
   if (mesh.waterDrop) {
     geometry.setAttribute('waterDrop', new THREE.BufferAttribute(mesh.waterDrop, 1));
+  }
+  if (mesh.light) {
+    geometry.setAttribute('aLight', new THREE.BufferAttribute(mesh.light, 2));
+  }
+  if (mesh.ao) {
+    geometry.setAttribute('aAO', new THREE.BufferAttribute(mesh.ao, 1));
   }
   geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
   if (voxelSize !== 1) geometry.scale(voxelSize, voxelSize, voxelSize);

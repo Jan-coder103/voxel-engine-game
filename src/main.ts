@@ -16,7 +16,9 @@ import {
 import { raycastVoxels, type RaycastHit } from './voxel/raycast';
 import { applyEdits, EditHistory, intersectsPlayerCell, type VoxelEdit } from './voxel/edits';
 import { FluidSim } from './voxel/fluid';
+import { packCellKey, unpackCellKey } from './voxel/fluid';
 import { FireSim } from './voxel/fire';
+import { LightField } from './voxel/light';
 import { debrisFromCells, explode } from './voxel/damage';
 import { StructuralSim } from './voxel/structure';
 import { PowerSim } from './voxel/power';
@@ -91,6 +93,11 @@ const STRUCTURE_ANALYSES_PER_TICK = 1;
 /** Utility component rebuilds per fixed step (Phase 15; one BFS each). */
 const POWER_REBUILDS_PER_TICK = 1;
 const PLUMBING_REBUILDS_PER_TICK = 1;
+/** Light BFS pops per fixed step (Phase 17 activity budget). */
+const LIGHT_POPS_PER_TICK = 1200;
+/** Block light level of burning cells and lit lamps (of 15). */
+const FIRE_LIGHT_LEVEL = 14;
+const LAMP_LIGHT_LEVEL = 15;
 
 const EDIT_REACH = 6;
 const AUTOSAVE_INTERVAL_MS = 20_000;
@@ -149,6 +156,9 @@ function main(): void {
   const structure = new StructuralSim(world); // chains after fire (burn-outs collapse)
   const power = new PowerSim(world); // lamp/cable/generator grid (Phase 15)
   const plumbing = new PlumbingSim(world, fluid); // water main + leaks (Phase 15)
+  // The light field (Phase 17) — before chunk generation so spawn chunks
+  // initialize immediately; chains onto the same World hooks.
+  const light = new LightField(world);
   // The world clock + weather (Phase 16) — constructed before the NPC sim
   // so its schedule can read the atmosphere's ticks.
   const atmosphere = new AtmosphereSim(terrain.seed);
@@ -187,6 +197,7 @@ function main(): void {
     streaming: streamingParams(RENDER_RADIUS),
     meshBudgetPerFrame: MESH_BUDGET_PER_FRAME,
     waterLevels: (x, y, z) => fluid.levelAt(x, y, z),
+    light: (x, y, z) => light.packedAt(x, y, z),
   });
   const selectionViz = new SelectionViz(engine.scene);
   const creatorViz = new CreatorViz(engine.scene);
@@ -363,6 +374,38 @@ function main(): void {
   const atmosphereViz = new AtmosphereViz(engine.scene, materials, fogNear, fogFar);
   const colorFor = (material: VoxelMaterialID) => getMaterial(material).color;
   let explosionSeed = 1;
+
+  // --- Light sources (Phase 17) ------------------------------------------
+  // The light field's dynamic sources mirror the power sim's lit set and
+  // the fire sim's burning set. Neither owner writes voxels when its
+  // state changes, so main diffs snapshots into idempotent `setSource`
+  // calls, gated on the cheap revision/counter reads.
+  const appliedLamps = new Map<number, number>();
+  const appliedFires = new Map<number, number>();
+  const syncSources = (
+    applied: Map<number, number>,
+    cells: { x: number; y: number; z: number }[],
+    level: number,
+  ): void => {
+    const desired = new Set<number>();
+    for (const cell of cells) {
+      const key = packCellKey(cell.x, cell.y, cell.z);
+      desired.add(key);
+      if (applied.get(key) !== level) {
+        light.setSource(cell.x, cell.y, cell.z, level);
+        applied.set(key, level);
+      }
+    }
+    for (const [key, appliedLevel] of [...applied]) {
+      if (appliedLevel === level && !desired.has(key)) {
+        applied.delete(key);
+        const cell = unpackCellKey(key);
+        light.setSource(cell.x, cell.y, cell.z, 0);
+      }
+    }
+  };
+  let lightPowerRevision = -1;
+  let lightFireCount = -1;
 
   bus.on('explosion', () => sfx.boom());
   bus.on('structureCollapsed', () => {
@@ -639,6 +682,15 @@ function main(): void {
         power.reset();
         plumbing.reset();
         npc.reset();
+        // The light field is derived state like the utilities: drop it
+        // and re-initialize every loaded chunk around the rewritten
+        // journal, then re-apply lamp/fire sources from scratch.
+        light.reset();
+        light.rescan();
+        appliedLamps.clear();
+        appliedFires.clear();
+        lightPowerRevision = -1;
+        lightFireCount = -1;
         // Utility state is derived from voxels: re-discover it on the
         // chunks the journal just rewrote (their writes bypass hooks).
         power.rescan();
@@ -758,6 +810,17 @@ function main(): void {
       // step's edits (and pour on their own cadence) before NPCs act.
       power.tick(POWER_REBUILDS_PER_TICK);
       plumbing.tick(PLUMBING_REBUILDS_PER_TICK);
+      // Light field (Phase 17): budgeted BFS settles this step's light
+      // changes; lamps follow the grid's revision, fire the burning set.
+      light.tick(LIGHT_POPS_PER_TICK);
+      if (power.revision !== lightPowerRevision) {
+        lightPowerRevision = power.revision;
+        syncSources(appliedLamps, power.litPositions(), LAMP_LIGHT_LEVEL);
+      }
+      if (fire.burningCount !== lightFireCount) {
+        lightFireCount = fire.burningCount;
+        syncSources(appliedFires, fire.burningList(), FIRE_LIGHT_LEVEL);
+      }
       // NPCs join the same fixed step (Phase 12): schedule, paths,
       // movement, population. Population centers on the player.
       npc.tick(player.position);
@@ -873,6 +936,7 @@ function main(): void {
           (fire.burningCount > 0 ? ` · fire ${fire.burningCount}` : '') +
           (structure.pendingCount > 0 ? ` · struct q${structure.pendingCount}` : '') +
           (structureViz.enabled ? ' · struct-viz (G)' : '') +
+          (light.pendingCount > 0 ? ` · light q${light.pendingCount}` : '') +
           (power.litCount > 0 ? ` · lamps ${power.litCount}` : '') +
           (plumbing.leakCount > 0 ? ` · leaks ${plumbing.leakCount}` : '') +
           (npc.count > 0 ? ` · npc ${npc.count}` : '') +
@@ -936,6 +1000,10 @@ function main(): void {
       power,
       plumbing,
       powerViz,
+      light,
+      scene: engine.scene,
+      skyAt: (x: number, y: number, z: number) => light.skyAt(x, y, z),
+      blockLightAt: (x: number, y: number, z: number) => light.blockAt(x, y, z),
       atmosphere: {
         state: atmosphere.snapshot,
         clock: () => atmosphere.clockString(),

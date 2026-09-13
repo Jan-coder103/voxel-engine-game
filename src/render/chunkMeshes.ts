@@ -64,6 +64,12 @@ export interface ChunkMeshManagerParams {
    * use them for flow-height rendering. LOD1 water renders as full cubes.
    */
   waterLevels?: (x: number, y: number, z: number) => number;
+  /**
+   * Packed light at world coordinates (Phase 17), `sky << 4 | block`; the
+   * mesher samples the air cell behind every face and folds it (plus
+   * vertex AO) into the merge signature and vertex attributes.
+   */
+  light?: (x: number, y: number, z: number) => number;
 }
 
 const DEFAULT_PARAMS: ChunkMeshManagerParams = {
@@ -205,12 +211,17 @@ export class ChunkMeshManager {
     const stride = lod === 1 ? LOD1_FACTOR : 1;
     // Flow heights only exist at full resolution (LOD1 water = full cube).
     const waterLevels = lod === 0 ? this.params.waterLevels : undefined;
+    const light = this.params.light;
     const mesh = meshVolumeGreedy(
       volume,
       (lx, ly, lz) =>
         this.world.getVoxel(origin.x + lx * stride, origin.y + ly * stride, origin.z + lz * stride),
       waterLevels
         ? (lx, ly, lz) => waterLevels(origin.x + lx, origin.y + ly, origin.z + lz)
+        : undefined,
+      light
+        ? (lx, ly, lz) =>
+            light(origin.x + lx * stride, origin.y + ly * stride, origin.z + lz * stride)
         : undefined,
     );
 

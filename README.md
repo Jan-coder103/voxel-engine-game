@@ -6,7 +6,7 @@ and NPCs that react to all of it. Long-term roadmap lives in
 `MICRO_WORLD_DEVELOPMENT_PLAN.md`; session-by-session state lives in
 `MICRO_WORLD_PROGRESS.md`.
 
-**Current state:** Phases 0–16 complete — an infinite streamed world of
+**Current state:** Phases 0–17 complete — an infinite streamed world of
 deterministic seeded terrain that is **editable, saveable, and
 destructible**: brush tools, box selection, clipboard, prefabs, and a
 voxel inspector (creator mode), explosions with material resistance,
@@ -30,12 +30,15 @@ blocks and lots, parameterized houses (some two-story with walkable
 interior stairs), shops, industrial buildings, trees, and a population
 that lives in the buildings' doorsteps — with **utilities** (a buried
 power grid feeds lampposts down every street; a water main runs from a
-lakeside pump to a working fountain) and a living **atmosphere**: a
-full day/night cycle with seasons, a seeded weather machine (clear →
-cloudy → overcast → rain → storm with smooth transitions), wind-blown
-clouds, fog, stars and a moon at night, rain and snow particles, and
-lightning that strikes (and ignites) during storms — rain douses
-exposed fires, the clock drives NPC schedules (Milestones 1–12 met; the
+lakeside pump to a working fountain), a living **atmosphere**: a full
+day/night cycle with seasons, a seeded weather machine (clear → cloudy →
+overcast → rain → storm with smooth transitions), wind-blown clouds,
+fog, stars and a moon at night, rain and snow particles, and lightning
+that strikes (and ignites) during storms — rain douses exposed fires,
+the clock drives NPC schedules — and a **voxel light field**: sunlight
+columns with tree shade and dark rooms, warm pools of lamplight on the
+streets at night, fire lighting its surroundings, and vertex ambient
+occlusion folding corners and interiors (Milestones 1–13 met; the
 Phase 8, 9 and 11 gate criteria are verified by tests, benchmarks, and
 headless browser runs).
 
@@ -56,13 +59,16 @@ two-story — walk in and up the stairs), brick shops, concrete industrial
 buildings, trees, and wandering figures who sleep at the doorsteps after
 dark. The world runs a **day/night cycle with seasons** under a seeded
 **weather machine** — clouds roll in, rain and snow fall, storms flash
-lightning that can start fires (rain puts them out again) — and the HUD
-clock drives the figures' schedules. The streets carry working
-utilities: a buried power grid lights the lampposts (dig up the plant at
-the central crossroads and the town goes dark; rebuild it and the lights
-pop back on), and a water main feeds a fountain near the center — break
-the main and watch the lane flood until you rip out the pump. Light a
-house on fire and watch what the neighborhood does.
+lightning that can start fires (rain puts them out again) — the HUD
+clock drives the figures' schedules, and a **voxel light field** makes
+roofs shade rooms, trees cast shade, and the street lamps cast warm
+pools of light after dark (dig a roof open and watch sunlight pour in).
+The streets carry working utilities: a buried power grid lights the
+lampposts (dig up the plant at the central crossroads and the town goes
+dark; rebuild it and the lights pop back on), and a water main feeds a
+fountain near the center — break the main and watch the lane flood
+until you rip out the pump. Light a house on fire and watch what the
+neighborhood does.
 
 Controls: click to capture the mouse, **WASD** move, **Space** jump
 (hold against a bank underwater to climb out), **Esc** release the
@@ -113,6 +119,8 @@ src/voxel/                 World state (no three.js — see ADR-002)
   raycast.ts               Voxel DDA selection raycast (pure)
   fluid.ts                 Cellular water: levels, sources, sleep/wake, budgeted ticks
   fire.ts                  Cellular fire: fuel, heat, spread, extinguish (pure)
+  light.ts                 Voxel light field: sky + block channels, BFS,
+                           sources (pure)
   damage.ts                Explosion damage fields, debris specs (pure)
   structure.ts             Structural sim: support graph (cantilever), stress, collapse (pure)
   power.ts                 Power grid: components, supply/demand, outages (pure)

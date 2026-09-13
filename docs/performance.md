@@ -272,6 +272,30 @@ the frame at the 256-cell budget and only matters while cells are
 actively burning in rain. `syncTo`'s segment walk makes clock
 fast-forwards (harness, debug) free.
 
+## Baselines — light field (`benchmarks/light.bench.ts`)
+
+2026-09-13, dev VM (2–3 cores, loaded; treat absolutes as
+machine-relative). All "settle" numbers are full BFS drains — in game
+they run under the 1200-pops/tick budget (~0.5–1 ms per tick) and spread
+progressively, exactly like the fluid sim's floods.
+
+| Scene                                                        | ≈ time/op                     |
+| ------------------------------------------------------------ | ----------------------------- |
+| chunk arrival — town chunk (generate + light init + settle)  | ≈ 13 ms one-time              |
+| incremental street edit — place/remove a wall block, settled | ≈ 178 ms per edit (BFS total) |
+| lamp fill — 100 open-air sources, settled                    | ≈ 443 ms (≈ 4.4 ms/source)    |
+| terrain chunk mesh — no light query (Phase 6 baseline)       | 3.42 ms mean                  |
+| terrain chunk mesh — light query + vertex AO                 | 3.67 ms mean (+7%)            |
+
+Reading: the incremental number is the total BFS work of one edit's
+removal + re-add cascades (a street-shading wall demotes a whole sky
+column plus its lateral boundaries, ~50–100k pops) — budgeted per tick
+it costs under a millisecond and the light visibly settles over a second
+or two, while the remesh storm rides the existing 3-chunks-per-frame
+budget. The lamp fill is the town boot (≈500 street lamps ≈ 2 s
+progressive fill-in while chunks stream). The mesher's +7% for light
+sampling and AO keeps a 3-chunk remesh frame inside budget.
+
 ## Runtime (dev session, Phase 5–8 demo)
 
 - 60 fps (vsync-capped) in the in-app browser at 1280×720 with render

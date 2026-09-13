@@ -32,15 +32,21 @@ export interface VoxelMaterialOptions {
 
 const VERT = /* glsl */ `
 attribute float materialId;
+attribute vec2 aLight;
+attribute float aAO;
 
 varying vec3 vNormal;
 varying vec3 vWorldPos;
 varying float vMaterialId;
 varying float vFogDepth;
+varying vec2 vLight;
+varying float vAO;
 
 void main() {
   vNormal = normal;
   vMaterialId = materialId;
+  vLight = aLight;
+  vAO = aAO;
   vec4 world = modelMatrix * vec4(position, 1.0);
   vWorldPos = world.xyz;
   vec4 mv = viewMatrix * world;
@@ -54,15 +60,20 @@ void main() {
 const WATER_VERT = /* glsl */ `
 attribute float materialId;
 attribute float waterDrop;
+attribute vec2 aLight;
 
 varying vec3 vNormal;
 varying vec3 vWorldPos;
 varying float vMaterialId;
 varying float vFogDepth;
+varying vec2 vLight;
+varying float vAO;
 
 void main() {
   vNormal = normal;
   vMaterialId = materialId;
+  vLight = aLight;
+  vAO = 1.0;
   vec3 p = position;
   p.y -= waterDrop;
   vec4 world = modelMatrix * vec4(p, 1.0);
@@ -85,11 +96,14 @@ uniform float uFogNear;
 uniform float uFogFar;
 uniform float uOpacity;
 uniform float uVariation;
+uniform vec3 uBlockColor;
 
 varying vec3 vNormal;
 varying vec3 vWorldPos;
 varying float vMaterialId;
 varying float vFogDepth;
+varying vec2 vLight;
+varying float vAO;
 
 float hashVoxel(vec3 p) {
   return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
@@ -105,9 +119,16 @@ void main() {
   float variation = hashVoxel(floor(vWorldPos - n * 0.5)) - 0.5;
   albedo *= 1.0 + 2.0 * uVariation * variation;
 
+  // Sky access modulates every outdoor term (Phase 17): caves and
+  // roofed rooms lose the sun and ambient, block light (lamps, fire)
+  // carries warm color in, AO folds corners down. The small floor keeps
+  // fully-enclosed geometry readable instead of absolute black.
+  float sky = max(vLight.x, 0.05);
+  float ao = vAO;
   float sun = max(dot(n, uSunDir), 0.0);
   vec3 ambient = mix(uGroundColor, uSkyColor, n.y * 0.5 + 0.5);
-  vec3 lit = albedo * (ambient + uSunColor * sun);
+  vec3 lit = albedo * (ambient + uSunColor * sun) * (sky * ao)
+           + albedo * uBlockColor * (vLight.y * ao);
 
   float fog = smoothstep(uFogNear, uFogFar, vFogDepth);
   vec3 color = mix(lit, uFogColor, fog);
@@ -150,6 +171,8 @@ export function createVoxelMaterials(options: VoxelMaterialOptions): VoxelMateri
     uFogColor: { value: sky },
     uFogNear: { value: options.fogNear },
     uFogFar: { value: options.fogFar },
+    // Warm tint for the light field's block channel (lamps, fire — Phase 17).
+    uBlockColor: { value: new THREE.Color(1.0, 0.74, 0.44).multiplyScalar(1.15) },
   };
 
   const make = (

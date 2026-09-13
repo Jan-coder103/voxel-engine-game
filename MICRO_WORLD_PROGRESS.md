@@ -31,23 +31,89 @@
 
 ## Overall Phase
 
-**Current phase:** Phase 16 (Weather/Atmosphere) — **complete and committed** (implementation, gates, docs). Milestone 13 met: the world runs on a real clock under a seeded sky — day/night with seasons, a weather machine (clear → cloudy → overcast → rain → storm) with smooth transitions, rain/snow, lightning that ignites (and rain that douses), and NPC schedules/sight now follow the sun. One deferral: the two consecutive full harness confirmation runs are pending (heavy-run deferral, tracked in HANDOFF). Next: Phase 17 (Visual Polish, plan §117) — the voxel light field first.
+**Current phase:** Phase 17 (Visual Polish — the voxel light field) — **complete and committed** (implementation, gates, in-page render verification, docs). Milestone 14 met: the world is lit — sunlight columns shade rooms and tree canopies, water dims with depth, lit lamps cast warm pools onto the night streets, fire lights its surroundings, and vertex AO folds corners and interiors. Same deferral policy as Phase 16: headless harness runs are deferred (tracked in HANDOFF) — the Phase 17 harness section is written and syntax-checked but has never run; render-side verification used single-page probes + screenshots instead.
 
-**Current milestone:** Milestones 1–13 met. Phase 16 adds the pure atmosphere core (clock, sun/moon arcs, seasons, weather Markov chain, lightning gate, sky palette), NPC clock/light injection, fire×rain coupling (wet/douse/refuse/force-ignite), the sky-dome + precip rendering, and 22 tests (401 total).
+**Current milestone:** Milestones 1–14 met. Phase 17 adds the pure light field (sky + block channels, two-queue incremental BFS with staleness re-checks, chunk-init column/border/break/lit-boundary seeds, dynamic source sync from power/fire + static emission), greedy-mesher light signature + per-corner vertex AO → `aLight`/`aAO` attributes, the shader's sky-access × AO + warm block terms, and 19 tests (420 total).
 
-**Overall completion:** ~69% (Phases 0–16 done; deferred: NPC inventory, hunger consequences, NPC wading/swimming, fire persistence in saves, volumetric smoke, rain→fluid accumulation, wind→fire coupling, snow/vegetation seasonality, Phase 11 deferrals (lateral load, rigid bodies), fear herding/personality, glass transparency, traffic graph, voltage/current model + switches/valves/drains/sewer (known-issues "Utilities"), pump power coupling, **lamp light contribution (Phase 17 lighting — next)**)
+**Overall completion:** ~71% (Phases 0–17 done; deferred: NPC inventory, hunger consequences, NPC wading/swimming, fire persistence in saves, volumetric smoke, rain→fluid accumulation, wind→fire coupling, snow/vegetation seasonality, Phase 11 deferrals (lateral load, rigid bodies), fear herding/personality, glass transmission, traffic graph, voltage/current model + switches/valves/drains/sewer (known-issues "Utilities"), pump power coupling, day/night lamp switching, NPC-sight/fire coupling to the light field (known-issues "Lighting"), remaining Phase 17 checklist items (materials polish, post-FX, GI experiments — pointless under SwiftShader on this VM))
 
-**Last completed task:** Session 012 (2026-09-12 → 13) — implemented Phase 16: pure atmosphere sim (`src/sim/atmosphere.ts`: clock/seasons/weather/lightning/palette, stepping ≡ syncTo determinism), NPC clock+lightLevel injection, fire setRain coupling with sky-exposure wetting, sky-dome + rain/snow rendering, 22 tests (401 total), atmosphere benchmarks, harness Phase 16 section (ran once pre-fix 7/8; fixes probe-verified), docs.
+**Last completed task:** Session 013 (2026-09-13) — implemented the Phase 17 light field: `src/voxel/light.ts` (sky+block channels, incremental two-queue BFS with staleness re-check, chunk-init column fills + border/break/lit-boundary seeds, dynamic + static sources), greedy-mesher light signature + per-corner vertex AO → `aLight`/`aAO` attributes, voxel shader sky-access × AO + warm block terms, main wiring (tick budget, lamp/fire source sync, load-path reset), 19 tests (420 total) incl. the incremental ≡ recompute gold test, light benchmarks, in-page probes + day/night screenshots, harness Phase 17 section (written, never run), docs.
 
 **Current task:** None — session complete, work committed.
 
-**Blocked by:** Nothing. (Pending when the machine is idle: the two harness confirmation runs listed in HANDOFF.)
+**Blocked by:** Nothing. (Pending when the machine is idle: the harness runs listed in HANDOFF — two clean full runs for Phase 16, first runs ever for Phase 17.)
 
-**Next recommended action:** **Phase 17 (Visual Polish)** per the plan (§117): the voxel light field is the big win — sunlight columns + block light from lamps/fire with BFS propagation and incremental updates on the World hook, consumed by the mesher as a per-vertex light attribute (sky × daylight + warm block light) — lamps finally illuminate streets at night and fire lights rooms; the powerViz glow shells get a real light source behind them. Vertex AO in the mesher is the cheap second win. Post-FX/reflections stay deferred (SwiftShader software GL).
+**Next recommended action:** In the next idle window, run the deferred headless harness confirmations (they gate the Phase 16 and 17 sections — 8 + 5 checks — plus the two Phase 12/13 repointed night checks). Then finish Phase 17 with the cheap consumers of the new field — NPC night sight sampling local light, the inspector showing sky/block values, day/night lamp switching in the power sim — and move to Phase 18 (Scenario System, plan §118). Post-FX/GI/reflections stay deferred (SwiftShader software GL makes them meaningless on this VM).
 
 ---
 
 # Session Log
+
+## Session 013 — 2026-09-13
+
+**Status:** Complete — Phase 17 (Visual Polish: the voxel light field) implemented, gated, in-page-verified, documented, committed. Milestone 14 met. Session 012's Phase 16 was first verified (401 tests + all gates), documented, and committed. Harness runs for both phases remain deferred per the VM-load policy (user instruction: skip long/heavy runs on this box, keep track of them — see HANDOFF).
+
+### Completed
+
+- [x] **Session 012 wrap**: verified the uncommitted Phase 16 state (401 tests, typecheck/lint/prettier/build clean), wrote the six standard docs, committed Phase 16 as `[0.14.0]` (harness re-runs deferred, tracked).
+- [x] **Pure light field** (`src/voxel/light.ts`, ADR-002/005): two channels — **sky** (column rule: 15 iff everything above is transparent; free straight-down propagation through air; −1 lateral; water −2, glass −1; leaves block → tree shade) and **block** (point sources at −1/step). Two-queue incremental BFS (add + removal with per-entry staleness re-check), budgeted ticks (`DEFAULT_LIGHT_BUDGET` 1200 pops), `pendingCount` HUD hook.
+- [x] **Sources**: `setSource(x, y, z, level)` idempotent (main diffs the power sim's `litPositions()` on revision bumps and the fire sim's `burningList()` on burning-count changes); static emission via derived `MATERIAL_EMISSION` (generators, 7) reconciled by the change hook and chunk init.
+- [x] **Chunk init** (on `onChunkReady`): lazily allocates the chunk's `lightSky`/`lightBlock` arrays, fills sky columns top-down (unloaded-above reads as air), seeds column breaks (all six blocker neighbors), demotes orphaned 15s below new blockers in already-initialized chunks (streaming-order independence), seeds both border directions and the **lit-boundary pass** (every lit cell bordering a dimmer transparent cell).
+- [x] **Mesher integration**: `meshVolumeGreedy` gains an optional packed-light query; per-face light (sampled at the air cell) joins the merge signature; per-quad-corner 3-sample vertex AO for the opaque pass; new `aLight` (vec2) / `aAO` (float) vertex attributes through `voxelGeometry.ts`; the naive baseline mesher is untouched and the greedy↔naive equivalence tests pass unchanged.
+- [x] **Shader** (`voxelMaterial.ts`): sky access scales the outdoor terms (`(ambient + sun) × sky × ao`, 0.05 floor), the block channel adds the warm `uBlockColor` term; water pass carries `aLight` (no AO).
+- [x] **main.ts wiring**: LightField before chunk generation (hooks); `light.tick(LIGHT_POPS_PER_TICK)` in the fixed step; lamp/fire source sync (revision/count-gated); `light.reset()+rescan()` + source re-sync on load; `light.packedAt` into ChunkMeshManager; HUD `· light qN`; `__mw.light`/`skyAt`/`blockLightAt`/`scene` debug hooks.
+- [x] **Tests** (`tests/light.test.ts`, NEW — 19; **420 total**, 32 files): sky columns, free-fall shafts, overhang shading, water/glass attenuation, sealed-room sources, source removal/occlusion/overlap, unloaded-chunk sources, static emission (placed + generated paths), cross-chunk flow, uninitialized default, **incremental ≡ full recompute gold test** (60 random edits, both channels), determinism, budget-1 drain, mesher light/AO attributes + signature splits + water-pass shape.
+- [x] **Benchmarks** (`benchmarks/light.bench.ts`, NEW): town-chunk arrival ≈ 13 ms; settled incremental street edit ≈ 178 ms BFS total (< 1 ms/tick budgeted in game); 100-lamp fill ≈ 443 ms progressive; mesher light+AO delta +7% (3.42 → 3.67 ms/terrain chunk). VM numbers — `docs/performance.md`.
+- [x] **In-page render verification** (single-page probes + screenshots — the cheap substitute for the deferred harness runs): sky 15 above ground / 0 underground; 54 lamps lit at night with block light 15 at the lamp, 10–12 in the street; burning cells hold 14 with 13 above; mesh `aLight`/`aAO` attributes match the field; voxel uniforms day-correct (zenith `87b5e0` at 10:18); screenshots `p17-day.png` (bright sunlit town), `p17-night.png` + `p17-lamp.png` (dark streets, warm lamp pools lighting building walls). Zero page errors across all probes.
+- [x] **Harness** (`.verify/run.mjs`): Phase 17 section (5 checks: sky columns, night lamp light, roofed-room dark + lamp relight, fire light, clock restore) — written and `node --check`ed; **never run** (deferred).
+- [x] **Docs**: architecture "Light field (Phase 17)" + utilities note + test/benchmark lists, performance light baselines, known-issues new "Lighting (Phase 17)" section (8 entries) + the Phase 16 no-light-field bullet superseded, README (state 0–17, quickstart light paragraph, layout), CHANGELOG `[0.15.0]`, this file + Phase 17 checklist.
+
+### Fixed (both found by the gold property test)
+
+- **Stale removal entries permanently dimmed re-lit columns**: a removal entry queued before the column walk re-set the cell's 15 cascaded later (sky free-fall eats downward), zeroing the fresh value; the lateral refill then read −1-per-step (12 where 15 was correct). Removal pops now re-check the cell's current level — a stale entry re-seeds the add queue instead of cascading.
+- **Streaming-order phantom light**: a chunk generating above/beside initialized chunks left orphaned sky-15s below its new blockers (and starved shadows beside its open columns). initChunk now demotes the topmost orphan below each break (the cascade eats the column) and the lit-boundary pass feeds the shadows.
+- (Session lesson, twice over: the first "divergence" batch was two fixture bugs — a flat-world generator that filled stone in _every_ Y layer (accidental slab at y=16–20) and a reference world missing the lamp source; and one test expecting the vertical path where a lateral path was legitimately brighter. Probe before diagnosing the sim.)
+
+### Verification lessons (for future sessions)
+
+- **Screenshots without pointer lock shoot through the overlay's 82% black scrim** (`#overlay { background: rgba(8,10,16,0.82) }`) — a bright day scene reads as near-black. The harness always clicks first; standalone probes must too. This cost a long "the renderer is broken" hunt that a single click would have skipped.
+- The gold property test (incremental vs from-scratch) earned its keep twice — both real sim bugs were invisible to targeted fixtures. When adding queue-based incremental algorithms, write the recompute-equivalence test first.
+- vite-node probes may serve stale transformed modules after edits — when probe output contradicts the code you just changed, add a sentinel log to confirm the module actually reloaded.
+
+### Deferred deliberately
+
+- **Headless harness runs** (the repo's standard integration verification) — per the user's VM-load policy this session; see HANDOFF for the pending list: two clean full runs for Phase 16 (its section ran once pre-fix, 7/8), and the first-ever runs for Phase 17 (5 new checks, written + syntax-checked only). Render-side confidence this session came from single-page probes + screenshots (cheap; ~60–90 s each).
+- Remaining Phase 17 checklist items: materials/micro-detail polish, reflections/SSR/bloom/tonemapping/color grading/volumetric effects/temporal AA/GI experiments (post-FX is meaningless under SwiftShader software GL — revisit on real hardware), GPU particles.
+- Cheap follow-ups now enabled by the field: NPC night sight sampling local light, inspector light readout, day/night lamp switching, light-driven fire rain checks.
+- Mesher refinements: smooth per-vertex light interpolation, quad-diagonal AO flip — known-issues "Lighting".
+
+### Tests
+
+- Unit tests: 420 passed (32 files; +19 light)
+- Integration: in-page probes (light values, mesh attributes, uniforms, screenshots — zero page errors); harness Phase 17 section written but **never run**; Phase 16 harness confirmation runs still pending; manual GUI pass pending (user)
+- Typecheck: clean (strict) · Lint: clean · Prettier: clean · Build: succeeds
+
+### Benchmarks
+
+- Light: chunk arrival ≈ 13 ms; settled street edit ≈ 178 ms BFS total (budgeted < 1 ms/tick); 100-lamp fill ≈ 443 ms; mesher +7% for light+AO — `docs/performance.md` (loaded-VM caveat)
+- FPS: idle unchanged (the field early-exits on empty queues); the sky-dome/precip costs are unchanged from Phase 16
+
+### Architecture changes
+
+- New: `src/voxel/light.ts` (pure), `tests/light.test.ts`, `benchmarks/light.bench.ts`.
+- `Chunk` gained optional `lightSky`/`lightBlock` arrays (freed with the chunk); `MeshData` gained optional `light`/`ao`; materials registry gained the derived `MATERIAL_EMISSION` table (not serialized).
+- `GameEvent` union unchanged; save format untouched (v2 — light is derived state, loads reset+rescan).
+- `__mw` grew `light`, `skyAt`, `blockLightAt`, `scene` (DEV-only).
+
+### Known issues
+
+- `docs/known-issues.md`: new "Lighting (Phase 17)" section — fire-light lag under the BFS budget, per-quad-corner AO (no smooth interior variation, no diagonal flip), flat per-face light, always-on lamps, transparency table limits, uninitialized-chunk window, no NPC/inspector/fire consumers yet, derived-state save behavior. The Phase 16 "no light field" bullet is marked superseded.
+
+### Next task
+
+- Task: run the deferred harness confirmations in the next idle window (Phase 16 ×2, Phase 17 ×1+); then Phase 17 leftovers (NPC sight / inspector / lamp-switch consumers) or Phase 18 — Scenario System (plan §118).
+
+---
 
 ## Session 012 — 2026-09-12 → 13
 
@@ -1490,21 +1556,26 @@ _(Perception landed as Phase 13 (§111); the plan's Phase 12 scope was navigatio
 
 # Phase 17 — Visual Polish
 
-- [ ] Improve voxel materials
-- [ ] Procedural micro-detail
-- [ ] Voxel AO
-- [ ] Contact shadows
-- [ ] Cascaded shadows
-- [ ] Reflections
-- [ ] SSR experiment
-- [ ] Bloom
-- [ ] Tone mapping
-- [ ] Color grading
-- [ ] Volumetric fog
-- [ ] Volumetric clouds
-- [ ] Temporal AA experiment
-- [ ] Voxel GI experiment
-- [ ] GPU particle system
+- [ ] Improve voxel materials _(deferred — palette + shader variation exists; micro-detail is a real-hardware item)_
+- [ ] Procedural micro-detail _(deferred — plan §31; SwiftShader makes per-pixel detail work unverifiable on this VM)_
+- [x] Voxel AO _(classic 3-sample per-corner vertex AO in the greedy mesher (`aAO`), merge-signature-safe; Session 013)_
+- [ ] Contact shadows _(deferred — AO + the light field cover the believable core)_
+- [ ] Cascaded shadows _(deferred — the voxel shader's single directional sun + sky-access shading carries the look; revisit with WebGPU)_
+- [ ] Reflections _(deferred — post-FX under SwiftShader is meaningless on this VM)_
+- [ ] SSR experiment _(deferred — research track, real hardware)_
+- [ ] Bloom _(deferred — post-FX, see above)_
+- [ ] Tone mapping _(deferred — post-FX, see above)_
+- [ ] Color grading _(deferred — post-FX, see above)_
+- [ ] Volumetric fog _(deferred — palette fog + weather fog-factor exists; volumetrics are a research track)_
+- [ ] Volumetric clouds _(deferred — 2D fbm dome clouds landed in Phase 16)_
+- [ ] Temporal AA experiment _(deferred — research track)_
+- [ ] Voxel GI experiment _(deferred — the light field's sky+block channels are the believable approximation; true GI is a research track)_
+- [ ] GPU particle system _(deferred — pooled CPU particles stay inside budget; WebGPU compute is Phase 22)_
+- [x] **Voxel light field** _(beyond-checklist core of Phase 17: sky + block channels, incremental BFS, lamps/fire illuminate, `aLight` attribute — Session 013)_
+
+### Milestone
+
+- [x] **Milestone 14 complete: The world is lit** _(met — sunlight columns shade rooms/canopies and pour through opened roofs, lamps cast warm pools on night streets, fire lights its surroundings, water dims with depth, vertex AO folds corners; unit-tested incl. incremental ≡ recompute, probed in-page day/night; limitations in `docs/known-issues.md` "Lighting (Phase 17)")_
 
 ---
 

@@ -187,6 +187,22 @@ export function strengthOf(id: VoxelMaterialID): number {
   return MATERIAL_STRENGTH[id] ?? 18;
 }
 
+/**
+ * Static light emission (Phase 17): how much block light (0–15) a cell of
+ * this material gives off by itself. A derived balance table like
+ * MATERIAL_HARDNESS/MATERIAL_FIRE — not serialized. Only self-luminous
+ * machines belong here: lit lamps and burning cells are *stateful*
+ * sources the power sim and fire sim own (the LightField's source map),
+ * because the same lamp voxel can be lit or dark.
+ */
+const MATERIAL_EMISSION: Readonly<Record<number, number>> = {
+  [GENERATOR]: 7,
+};
+
+export function emissionOf(id: VoxelMaterialID): number {
+  return MATERIAL_EMISSION[id] ?? 0;
+}
+
 /** Bump when the serialized table layout changes (not when entries are added). */
 export const MATERIAL_FORMAT_VERSION = 1;
 

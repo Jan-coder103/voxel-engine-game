@@ -104,6 +104,17 @@ export interface MeshData {
    * of surface cells, 0 elsewhere. The water shader subtracts it from Y.
    */
   waterDrop?: Float32Array;
+  /**
+   * Light (greedy mesher, Phase 17): 2 floats per vertex — sky and block
+   * light of the face's air cell, normalized by 15. Present only when the
+   * mesher was given a light query.
+   */
+  light?: Float32Array;
+  /**
+   * Vertex ambient occlusion (greedy mesher, opaque pass, Phase 17):
+   * 1 float per vertex, corner AO level 0–3 normalized by 3.
+   */
+  ao?: Float32Array;
 }
 
 /** Opaque and water passes for one volume (water renders transparent). */

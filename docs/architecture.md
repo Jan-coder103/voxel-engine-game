@@ -539,9 +539,10 @@ is transient and derived from voxels; the save format is untouched.
   or a wire splits the network into independent components, each
   rebuilt separately — the severed far side genuinely goes dark/dry.
 - **Rendering** (`src/render/powerViz.ts`): one pooled InstancedMesh of
-  warm translucent shells over lit lamps, rebuilt only when the sim's
-  `revision` changes. The lamp voxel itself is a dim housing; there are
-  no dynamic lights yet (Phase 17).
+  warm glow shells over lit lamps, rebuilt only when the sim's `revision`
+  changes. Since Phase 17 the lit set also feeds the light field, so
+  lamps cast real block light; the shells remain the "this lamp is on"
+  indicator.
 - **Performance**: `makeCachedReader` (`src/voxel/cachedReader.ts`) gives
   rebuild BFS a real chunk cache — the World's one-slot memo thrashes
   under the flood's access pattern (~0.9 µs/read on the dev VM). A
@@ -596,6 +597,56 @@ weather like burn-outs still persist via the journal).
   uniforms (sun/ambient/fog; at night the sun term re-aims at the moon
   with a faint blue tint) and `PrecipSystem` pools instanced rain
   streaks / snow flakes around the camera.
+
+## Light field (Phase 17)
+
+Phase 17 gives every voxel two light channels, Minecraft-shaped because
+that is the believable-at-16³ version of "voxel AO / dynamic lighting":
+
+- **Sky light** 0–15: a cell is 15 iff every cell above it is
+  light-transparent; 15 propagates straight down for free through air,
+  spreads sideways at −1 per step, and attenuates through water (−2) and
+  glass (−1). Opaque voxels block — leaves make tree shade, roofs make
+  dark rooms. **Block light** 0–15: point sources (lit lamps follow the
+  power sim's lit set, burning cells the fire sim's — main diffs both
+  into idempotent `setSource` calls gated on the power revision and
+  burning count; self-luminous machines come from the derived
+  `MATERIAL_EMISSION` table) spread at −1 per step.
+- **Storage** is two `Uint8Array`s on each `Chunk` (lazily allocated at
+  init; unloading frees the light with the chunk). Chunks the field has
+  never initialized read as "full sky" through the mesher query, so
+  streaming never renders darker than the pre-light look.
+- **Updates** are the standard two-queue incremental BFS (budgeted
+  1200 pops/tick like the fluid sim): a voxel change removes the cell's
+  stale light (cascading downward with the sky free-fall rule,
+  re-seeding brighter borders), re-walks the edited sky column, then
+  re-adds from the border seeds. Removal entries re-check the cell's
+  current value when popped — a column walk can legitimately re-light a
+  cell between enqueue and pop, and the stale entry must not cascade.
+  Chunk generation initializes columns directly, seeds both border
+  directions, the six neighbors of every column break, and (the
+  lit-boundary pass) every lit cell bordering a dimmer transparent cell —
+  streaming order is arbitrary, so a chunk that arrives above/beside
+  existing ones must both demote orphaned 15s below new blockers and
+  feed shadows beside its open columns.
+- **Every changed value marks the chunk (and boundary neighbors) mesh
+  dirty**, so remeshing picks light up through the normal frame budget.
+- **Mesher**: `meshVolumeGreedy` takes an optional packed-light query;
+  each face samples the cell it looks into, and light is part of the
+  merge signature (quads never smear bright into dark). Each quad corner
+  gets a classic 3-sample vertex AO (two edge neighbors + diagonal in
+  the face plane, around that corner's air cell), sampled per quad
+  corner so merging stays maximal. Both emit as `aLight` (vec2,
+  normalized by 15) and `aAO` (float, 0–3 → 0–1) vertex attributes; the
+  naive baseline mesher is untouched and the greedy↔naive equivalence
+  tests still compare the face multiset.
+- **Shader**: the voxel fragment shader modulates the outdoor terms by
+  sky access and folds AO into them (`(ambient + sun) × sky × ao`), then
+  adds the warm block-light term (`uBlockColor × block × ao`) — lamps
+  and fire carry the night, caves read as dark, interiors get window
+  light. A 0.05 ambient floor keeps fully-enclosed geometry readable.
+  The property test pins incremental ≡ from-scratch after 60 random
+  edits across both channels.
 
 ## Chunk meshing and streaming
 
@@ -715,11 +766,16 @@ depth write so lake beds stay visible.
   independent networks, silent discovery, rescan; pressurized mains,
   leaks, taps, severed-side isolation, pour rules), town utilities
   (every generated lamp lit on two seeds, plant anatomy, pole anatomy,
-  continuous pressurized main, burst-and-rip end-to-end), and
-  atmosphere (clock/seasons, stepping ≡ syncTo determinism, weather
-  reachability + smoothness + force, deterministic lightning, sun
-  noon/midnight, seasonal sun/daylight, snow-vs-rain, palette shapes,
-  fire×rain douse/roof/refuse/force, NPC clock injection + night sight).
+  continuous pressurized main, burst-and-rip end-to-end), atmosphere
+  (clock/seasons, stepping ≡ syncTo determinism, weather reachability +
+  smoothness + force, deterministic lightning, sun noon/midnight,
+  seasonal sun/daylight, snow-vs-rain, palette shapes, fire×rain
+  douse/roof/refuse/force, NPC clock injection + night sight), and light
+  (sky columns + free-fall shafts, lateral attenuation, water/glass
+  opacity, block sources add/remove/occlude/combine, static emission on
+  both paths, cross-chunk flow, uninitialized default, incremental ≡
+  full recompute over 60 random edits, determinism, budget, mesher
+  light/AO attributes and merge signatures).
 - Benchmarks: `benchmarks/mesher.bench.ts` (naive vs greedy, solid/
   checker/layered/terrain), `benchmarks/storage.bench.ts` (dense vs
   packed), `benchmarks/terrain.bench.ts`, `benchmarks/destruction.bench.ts`
@@ -731,7 +787,9 @@ depth write so lake beds stay visible.
   plan, census), `benchmarks/npc.bench.ts` (re-path, population tick),
   `benchmarks/utilities.bench.ts` (grid rebuild gate, main rebuild,
   pour cadence, route scan), `benchmarks/atmosphere.bench.ts` (per-tick
-  atmosphere cost, full-year syncTo, fire tick clear vs storm). Baselines
+  atmosphere cost, full-year syncTo, fire tick clear vs storm),
+  `benchmarks/light.bench.ts` (chunk arrival, incremental street edit,
+  100-lamp fill, mesher with/without light+AO). Baselines
   in `docs/performance.md`.
 - Headless GUI verification: `.verify/run.mjs` (local, gitignored)
   drives the real game in Playwright Chromium through the dev-only
