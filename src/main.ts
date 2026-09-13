@@ -25,6 +25,17 @@ import { PowerSim } from './voxel/power';
 import { PlumbingSim } from './voxel/plumbing';
 import { AtmosphereSim, type Weather } from './sim/atmosphere';
 import { NpcSim } from './npc/npc';
+import { ScenarioEngine, type ScenarioIo } from './scenario/engine';
+import {
+  SCENARIO_IDS,
+  SCENARIO_TITLES,
+  buildScenario,
+  resolveSites,
+  scenarioReady,
+  scenarioTarget,
+  type ScenarioId,
+  type ScenarioSites,
+} from './scenario/definitions';
 import {
   AutosavePolicy,
   deserializeWorld,
@@ -163,6 +174,9 @@ function main(): void {
   // so its schedule can read the atmosphere's ticks.
   const atmosphere = new AtmosphereSim(terrain.seed);
   const town = townAnchors(terrain);
+  // Scenario staging sites (Phase 18): deterministic town/main/plant
+  // positions, resolved once from the seed.
+  const scenarioSites = resolveSites(terrain);
   const npc = new NpcSim(world, terrain.seed, {
     anchors: town,
     groundY: (x, z) => heightAt(x, z, terrain),
@@ -449,6 +463,88 @@ function main(): void {
     }
   };
 
+  // --- Scenarios (Phase 18) ----------------------------------------------
+  // Small staged vignettes over the live sims: the engine is pure and
+  // tick-driven; everything world-touching goes through this io (the same
+  // undoable edit path the player uses). Scenario state is transient — a
+  // load (L) stops the run, its consequences persist via the journal.
+  const scenario = new ScenarioEngine();
+  const scenarioNotes: { text: string; at: number }[] = [];
+  const scenarioIo: ScenarioIo = {
+    world,
+    npc,
+    player: () => player.position,
+    sensors: {
+      leakCount: () => plumbing.leakCount,
+      litCount: () => power.litCount,
+      burningCount: () => fire.burningCount,
+    },
+    edit,
+    ignite: (x, y, z) => fire.ignite(x, y, z),
+    forceWeather: (w) => atmosphere.forceWeather(w),
+    ensureAround: (x, z, radius) => {
+      const cx = Math.floor(x / CHUNK_SIZE);
+      const cz = Math.floor(z / CHUNK_SIZE);
+      for (let dz = -radius; dz <= radius; dz++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          for (let cy = 0; cy < WORLD_HEIGHT_CHUNKS; cy++) {
+            world.ensureChunk(cx + dx, cy, cz + dz);
+          }
+        }
+      }
+    },
+    spawnAt: (cell) => npc.spawn(cell)?.id,
+    setCounter: (key, value) => scenario.setCounter(key, value),
+    announce: (text) => {
+      scenarioNotes.push({ text, at: scenario.elapsed });
+      if (scenarioNotes.length > 3) scenarioNotes.shift();
+    },
+  };
+  bus.onAny((event) => scenario.onGameEvent(event));
+
+  // The sites a running scenario was staged from (its target is
+  // activeSites.buildings[0]) — exposed for HUD-adjacent debugging.
+  let activeScenarioSites: ScenarioSites | undefined;
+
+  /**
+   * Validate the stage, then start. Buildings are tried nearest-first:
+   * the first one that can actually host the scenario wins (a burned-out
+   * or soaked house is skipped, so scenarios chain through the town).
+   * Announces why when nothing qualifies.
+   */
+  const startScenario = (id: ScenarioId): boolean => {
+    const total = scenarioSites.buildings.length;
+    for (let i = 0; i <= total; i++) {
+      const rotated: ScenarioSites = {
+        ...scenarioSites,
+        buildings: [...scenarioSites.buildings.slice(i), ...scenarioSites.buildings.slice(0, i)],
+      };
+      const target = scenarioTarget(id, rotated);
+      if (!target) break;
+      scenarioIo.ensureAround(target.spec.door.x, target.spec.door.z, 3);
+      if (id === 'flood' && rotated.main) {
+        scenarioIo.ensureAround(rotated.main.burst.x, rotated.main.burst.z, 3);
+      }
+      if (!scenarioReady(id, world, rotated)) continue;
+      const def = buildScenario(id, rotated);
+      if (!def) continue;
+      activeScenarioSites = rotated;
+      scenario.start(def, scenarioIo);
+      return true;
+    }
+    scenarioIo.announce(`"${SCENARIO_TITLES[id]}" cannot run here — its stage is missing.`);
+    return false;
+  };
+  /** J: cycle to the next scenario in the registry. */
+  const startNextScenario = (): void => {
+    const startIndex = scenario.active
+      ? SCENARIO_IDS.indexOf(scenario.active.id as ScenarioId) + 1
+      : 0;
+    for (let i = 0; i < SCENARIO_IDS.length; i++) {
+      if (startScenario(SCENARIO_IDS[(startIndex + i) % SCENARIO_IDS.length])) return;
+    }
+  };
+
   /**
    * Structural collapse (Phase 11): the sim proposes the cells that lost
    * support or fractured under load; they fall as one undoable command.
@@ -670,6 +766,10 @@ function main(): void {
       saveNow();
       return;
     }
+    if (code === 'KeyJ') {
+      startNextScenario();
+      return;
+    }
     if (code === 'KeyL') {
       const saved = store.get(AUTOSAVE_KEY);
       if (!saved) return;
@@ -682,6 +782,8 @@ function main(): void {
         power.reset();
         plumbing.reset();
         npc.reset();
+        scenario.stop(); // scenario state is transient like fire/NPC state
+        scenarioNotes.length = 0;
         // The light field is derived state like the utilities: drop it
         // and re-initialize every loaded chunk around the rewritten
         // journal, then re-apply lamp/fire sources from scratch.
@@ -824,6 +926,9 @@ function main(): void {
       // NPCs join the same fixed step (Phase 12): schedule, paths,
       // movement, population. Population centers on the player.
       npc.tick(player.position);
+      // Scenarios (Phase 18) evaluate last: they see this step's fires,
+      // floods, collapses, and NPC moves in the same instant.
+      scenario.tick(scenarioIo);
       accumulator -= FIXED_DT;
     }
 
@@ -962,6 +1067,35 @@ function main(): void {
       } else {
         lines.push('creator off (C)');
       }
+      // Scenario status (Phase 18): objectives with progress marks, plus
+      // the freshest announcement while it is still relevant.
+      if (scenario.current !== 'idle') {
+        const views = scenario.objectiveViews();
+        const list = views
+          .map((o) => {
+            const mark =
+              o.status === 'done'
+                ? '[x]'
+                : o.status === 'failed'
+                  ? '[!]'
+                  : o.hidden
+                    ? '[?]'
+                    : '[ ]';
+            return `${mark} ${o.description}`;
+          })
+          .join(' · ');
+        const state =
+          scenario.current === 'running'
+            ? ''
+            : scenario.current === 'complete'
+              ? ' — COMPLETE'
+              : ` — FAILED (${scenario.failReason ?? '?'})`;
+        lines.push(`SCEN ${scenario.title}${state} · ${list} · J next`);
+        const lastNote = scenarioNotes[scenarioNotes.length - 1];
+        if (scenario.current === 'running' && lastNote && scenario.elapsed - lastNote.at < 600) {
+          lines.push(`» ${lastNote.text}`);
+        }
+      }
       if (creator.inspector) {
         const inspection = hit
           ? inspectVoxel(
@@ -1011,6 +1145,15 @@ function main(): void {
         force: (w: Weather) => atmosphere.forceWeather(w),
         strike: (x: number, z: number) => atmosphere.onStrike?.(x, z),
         viz: atmosphereViz,
+      },
+      scenario: {
+        engine: scenario,
+        sites: scenarioSites,
+        activeSites: () => activeScenarioSites,
+        ids: SCENARIO_IDS,
+        start: (id: ScenarioId) => startScenario(id),
+        stop: () => scenario.stop(),
+        notes: scenarioNotes,
       },
       town: {
         anchors: town,

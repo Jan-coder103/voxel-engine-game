@@ -648,6 +648,58 @@ that is the believable-at-16³ version of "voxel AO / dynamic lighting":
   The property test pins incremental ≡ from-scratch after 60 random
   edits across both channels.
 
+## Scenario system (Phase 18)
+
+- **The engine** (`src/scenario/engine.ts`, pure) is a tick-driven
+  evaluator over declarative definitions: a `setup` stages the world,
+  _objectives_ carry `done`/`failed`/`deadline` conditions (plus
+  `after` gates that hide an objective — and stop its deadline clock —
+  until an event happens), and one-shot _triggers_ stage timed beats
+  (hints, escalations). Conditions are pure functions of a context
+  (tick counter, bus-event log with box/radius/quiet queries, scratch
+  counters, box censuses, NPC lookups); all world-touching goes through
+  an injected `ScenarioIo` (journaled edits, ignite, weather,
+  force-loading chunks, NPC spawn, announce) that main implements over
+  the live game and tests over fixtures. Evaluation order per tick is
+  fixed: triggers → scenario-level fail/timeLimit → objectives in
+  declaration order. Completion requires at least one positive
+  (`done`) objective and all of them done; guard-only objectives
+  (fail-conditions without `done`) never block completion and are
+  marked done at the end. Scenario state is transient (not saved);
+  setup writes go through the normal journal and persist.
+- **The event log** is fed from the bus via a new `EventBus.onAny`
+  (while running only, capped at 512 records), so conditions can ask
+  "how many collapses near the site", "any explosions inside a
+  neighbor's box", "quiet for 240 ticks?".
+- **The five launch scenarios** (`src/scenario/definitions.ts`) are
+  staged from pure site resolution (`resolveSites`: enumerate town
+  buildings via `planAt`/`lotSpec`, the water main via `pipelineRoute`,
+  the generator via `generatorSite` — no hardcoded coordinates):
+  - **Flood** — the generated main bursts (Phase 15 leak pouring Phase 9
+    water); stop the leak (cut the pipe or take out the pump) before the
+    deadline; guard: no water in the generator vault box.
+  - **Fire** — the nearest house ignites low (a `findFlammable` scan
+    that skips water-adjacent and fully-sealed cells — the fire sim
+    would smother those instantly); douse it (placed water) before half
+    the structure is consumed; guards: neighbors unburned.
+  - **Collapse** — the ground-floor wall courses are carved out; the
+    Phase 11 support graph stages the real cascade; get clear, wait for
+    the quiet window, keep the witness (a real spawned figure) alive.
+  - **Demolition** — player-driven: level the nearest building
+    (collapse at the site or ¾ removed) with no blasts/fires in
+    neighbor boxes and no casualties.
+  - **Rescue** — a figure is spawned inside and the doorway boarded;
+    dig it out by hand; the figure walks free on its own schedule
+    (work/wander), and survives.
+- **main.ts wiring**: `J` cycles the registry; `__mw.scenario` exposes
+  engine/sites/ids/start/stop/notes. `startScenario` tries candidate
+  buildings **nearest-first and skips stages that cannot host the
+  scenario anymore** (a burned or soaked house) by re-validating
+  readiness per candidate — scenarios chain through the town instead of
+  re-targeting rubble. The scenario tick runs last in the fixed step
+  (it sees this step's fires, floods, collapses, and NPC moves); a
+  load (L) stops the run.
+
 ## Chunk meshing and streaming
 
 - Production meshing is `meshVolumeGreedy`: the 0fps per-axis sweep —

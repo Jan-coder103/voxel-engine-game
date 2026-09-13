@@ -69,6 +69,7 @@ type AnyHandler = (event: GameEvent) => void;
 
 export class EventBus {
   private readonly handlers = new Map<GameEventType, Set<AnyHandler>>();
+  private readonly anyHandlers = new Set<AnyHandler>();
 
   /** Subscribe to one event type; returns an unsubscribe function. */
   on<K extends GameEventType>(type: K, handler: Handler<K>): () => void {
@@ -84,8 +85,27 @@ export class EventBus {
     };
   }
 
+  /**
+   * Subscribe to every event type (scenario engine, replay, statistics —
+   * consumers that count rather than react to one kind). Returns an
+   * unsubscribe function.
+   */
+  onAny(handler: AnyHandler): () => void {
+    this.anyHandlers.add(handler);
+    return () => {
+      this.anyHandlers.delete(handler);
+    };
+  }
+
   /** Dispatch synchronously; a throwing handler does not block the others. */
   emit(event: GameEvent): void {
+    for (const handler of this.anyHandlers) {
+      try {
+        handler(event);
+      } catch (error) {
+        console.error('Event handler threw', error);
+      }
+    }
     const set = this.handlers.get(event.type);
     if (!set) return;
     for (const handler of set) {
@@ -98,6 +118,6 @@ export class EventBus {
   }
 
   listenerCount(type: GameEventType): number {
-    return this.handlers.get(type)?.size ?? 0;
+    return (this.handlers.get(type)?.size ?? 0) + this.anyHandlers.size;
   }
 }

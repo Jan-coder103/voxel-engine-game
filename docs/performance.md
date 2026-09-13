@@ -296,6 +296,23 @@ budget. The lamp fill is the town boot (≈500 street lamps ≈ 2 s
 progressive fill-in while chunks stream). The mesher's +7% for light
 sampling and AO keeps a 3-chunk remesh frame inside budget.
 
+## Baselines — scenarios (`benchmarks/scenario.bench.ts`)
+
+2026-09-13, dev VM (2–3 cores, load ~2; treat absolutes as
+machine-relative). The engine evaluates every fixed step, so its cost
+must be noise; these samples run 600 fixed steps each (10 s of game).
+
+| Scene                                                       | ≈ time/600 ticks         |
+| ----------------------------------------------------------- | ------------------------ |
+| fire scenario, idle objectives + sensors                    | ≈ 39 ms (≈ 0.11 µs/tick) |
+| fire scenario, under a 512-event log (event queries active) | ≈ 39 ms (≈ 0.11 µs/tick) |
+
+Reading: the scenario layer itself is free — conditions read cached sim
+counters, scratch counters, and (rarely) scan the capped 512-entry
+event log. Everything expensive a scenario does (fire spread, flood
+pouring, staged collapse) is budgeted inside the sims it stages and is
+measured in those sims' own baselines.
+
 ## Runtime (dev session, Phase 5–8 demo)
 
 - 60 fps (vsync-capped) in the in-app browser at 1280×720 with render

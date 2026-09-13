@@ -6,7 +6,7 @@ and NPCs that react to all of it. Long-term roadmap lives in
 `MICRO_WORLD_DEVELOPMENT_PLAN.md`; session-by-session state lives in
 `MICRO_WORLD_PROGRESS.md`.
 
-**Current state:** Phases 0–17 complete — an infinite streamed world of
+**Current state:** Phases 0–18 complete — an infinite streamed world of
 deterministic seeded terrain that is **editable, saveable, and
 destructible**: brush tools, box selection, clipboard, prefabs, and a
 voxel inspector (creator mode), explosions with material resistance,
@@ -40,7 +40,11 @@ columns with tree shade and dark rooms, warm pools of lamplight on the
 streets at night, fire lighting its surroundings, and vertex ambient
 occlusion folding corners and interiors (Milestones 1–13 met; the
 Phase 8, 9 and 11 gate criteria are verified by tests, benchmarks, and
-headless browser runs).
+headless browser runs) — and a **scenario system**: staged vignettes
+over the live simulation (a burst water main to contain, a house fire
+to douse, a building collapsing with a witness to keep safe, a
+demolition job with collateral limits, a trapped figure to dig out),
+started with **J** and tracked on the HUD (Milestones 1–14 met).
 
 ## Quickstart
 
@@ -70,12 +74,25 @@ fountain near the center — break the main and watch the lane flood
 until you rip out the pump. Light a house on fire and watch what the
 neighborhood does.
 
+**Scenarios** (press **J** to start the next, tracked on the HUD as
+`SCEN …`): the game stages small emergencies from the town itself — a
+**burst water main** flooding the street (cut the pipe between the lake
+pump and the break, or take out the pump — and keep the water off the
+power plant), a **house fire** to douse with placed water before the
+house burns down or the blaze jumps next door, a **collapse** whose
+ground floor gives way under the Phase 11 support graph (get clear;
+the witness should too), a **controlled demolition** (bring a building
+down cleanly — the neighbors are watching), and a **rescue** (someone
+is boarded into a house; dig them out by hand and they walk free on
+their own).
+
 Controls: click to capture the mouse, **WASD** move, **Space** jump
 (hold against a bank underwater to climb out), **Esc** release the
 mouse; **LMB** remove, **RMB** place, **MMB** pick material, **F** paint,
 **1–9**/wheel select material (6 = water — it flows; 12–17 are
 copper/lamp/generator/pipe/pump/tap — build your own grid or main), **Ctrl+Z/Y**
-undo/redo, **K** save, **L** load, **N** mute sound. Fall into the void
+undo/redo, **K** save, **L** load, **N** mute sound, **J** start the
+next scenario. Fall into the void
 and you respawn. The world autosaves (20 s cadence + when the tab hides)
 and restores on reload; `?seed=1234` starts a different fresh world.
 
@@ -142,6 +159,10 @@ src/sim/
   events.ts                Typed game event bus (ADR-003)
   atmosphere.ts            World clock, sun/seasons, weather machine,
                            lightning, sky palette (pure)
+src/scenario/              Scenario system (pure — no three.js)
+  engine.ts                Tick-driven evaluator: objectives, triggers,
+                           event log, ScenarioIo contract
+  definitions.ts           Five scenarios + deterministic site resolution
 src/npc/                   NPC simulation (pure — no three.js)
   navigation.ts            Walkable-cell queries, A* (implicit grid graph)
   npc.ts                   NpcSim: schedule, needs, fear/flee/investigate, population

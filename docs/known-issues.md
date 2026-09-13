@@ -373,6 +373,48 @@ milestone goes here before it goes to the backlog.
   networks: loads `reset()` + `rescan()` the field and re-sync lamp and
   fire sources from the sims.
 
+## Scenarios (Phase 18)
+
+- **In-page probe findings (open, Session 014).** The first
+  `.verify/probe-p18.mjs` run verified flood and collapse end to end in
+  the live page (start → play → complete, zero page errors), but three
+  items need diagnosis before the harness section can be trusted:
+  (1) **Rescue failed "the figure survives"** — the spawned victim
+  vanished during the run (population maintenance only despawns past
+  80 cells, so something else removed it; needs an instrumented probe
+  dumping victim id/counter/npc distances/`npcDied` events per few
+  seconds). (2) **Fire failed "keep it off the neighbors"** — grass
+  lawns carry fire between houses quickly, so the neighbor guard fires
+  if the dousing is not immediate; likely correct-but-hard tuning, and
+  the unattended neighbor fires then burned on through the collapse
+  window. (3) **Demolition found no ready building afterwards** — after
+  ~50 s of unattended neighbor fire, every rotated candidate failed
+  readiness; needs a re-probe with fire containment (rain or dousing)
+  before blaming the rotation loop.
+- **Scenario tuning is SwiftShader-relative.** Deadlines and hint
+  ticks are calibrated against this VM's ~0.5× sim rate; they will
+  need re-tuning on real hardware.
+- **Conditions read unloaded chunks as air.** Box censuses and event
+  geometry only see loaded chunks; main force-loads the stage at
+  start, but a player who runs far away can blind a guard until the
+  chunks stream back.
+- **Fire spreads through the town's grass.** The fire scenario's
+  neighbor guard assumes houses are separated by non-fuel; lawns and
+  street trees are fuel, so an unattended blaze cascades block-wide
+  (the plan §57 fire-ecology chain, arriving early).
+- **Guards are event-driven, not physical.** "Neighbors standing",
+  "nobody hurt" and "keep water off the plant" trust `GameEvent`
+  emissions and box censuses rather than tracking every cell; a player
+  who deletes a neighbor by hand pickaxe stays under the demolition
+  guard (the level-objective's collapse requirement is the real gate).
+- **One scenario at a time, transient.** Starting a new scenario
+  abandons the current run (its staged damage persists via the
+  journal); there is no scenario save/restore, and `L` (load) stops
+  the run.
+- **No scenario UI beyond the HUD line.** Objectives render as one
+  HUD line (`SCEN … [x]/[!]/[ ]` plus the latest announcement); a
+  proper panel, scenario selection menu, and scoring are deferred.
+
 ## GUI verification (headless)
 
 - **Automated browser runs have input races.** Under SwiftShader

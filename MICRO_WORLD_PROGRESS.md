@@ -31,23 +31,89 @@
 
 ## Overall Phase
 
-**Current phase:** Phase 17 (Visual Polish — the voxel light field) — **complete and committed** (implementation, gates, in-page render verification, docs). Milestone 14 met: the world is lit — sunlight columns shade rooms and tree canopies, water dims with depth, lit lamps cast warm pools onto the night streets, fire lights its surroundings, and vertex AO folds corners and interiors. Same deferral policy as Phase 16: headless harness runs are deferred (tracked in HANDOFF) — the Phase 17 harness section is written and syntax-checked but has never run; render-side verification used single-page probes + screenshots instead.
+**Current phase:** Phase 18 (Scenario System) — **core complete, committed** (`[0.16.0]`): pure scenario engine (objectives/triggers/event log/counters), five scenarios (flood, fire, collapse, demolition, rescue) staged from deterministic town sites, main wiring (`J` cycle, HUD `SCEN` line, `__mw.scenario`), 24 tests (**444 total**), micro-benchmarks, docs. In-page probe ran once: **flood and collapse verified end to end live** (zero page errors); three open items — rescue (victim vanished), fire (neighbor-jump guard), demolition (no ready building after an unattended fire) — are diagnostic tasks for Session 015 (see `docs/known-issues.md` "Scenarios (Phase 18)"). The Phase 18 harness section is **not yet written** (deliberately — encode expectations after the three items are resolved).
 
-**Current milestone:** Milestones 1–14 met. Phase 17 adds the pure light field (sky + block channels, two-queue incremental BFS with staleness re-checks, chunk-init column/border/break/lit-boundary seeds, dynamic source sync from power/fire + static emission), greedy-mesher light signature + per-corner vertex AO → `aLight`/`aAO` attributes, the shader's sky-access × AO + warm block terms, and 19 tests (420 total).
+**Current milestone:** Milestones 1–14 met (1–13 in earlier phases; 14 = the world is lit, Phase 17). Phase 18 adds the scenario layer; no new milestone gate defined for it in the checklist (plan §118 has no gate criteria).
 
-**Overall completion:** ~71% (Phases 0–17 done; deferred: NPC inventory, hunger consequences, NPC wading/swimming, fire persistence in saves, volumetric smoke, rain→fluid accumulation, wind→fire coupling, snow/vegetation seasonality, Phase 11 deferrals (lateral load, rigid bodies), fear herding/personality, glass transmission, traffic graph, voltage/current model + switches/valves/drains/sewer (known-issues "Utilities"), pump power coupling, day/night lamp switching, NPC-sight/fire coupling to the light field (known-issues "Lighting"), remaining Phase 17 checklist items (materials polish, post-FX, GI experiments — pointless under SwiftShader on this VM))
+**Overall completion:** ~73% (Phases 0–18 done; deferred: NPC inventory, hunger consequences, NPC wading/swimming, fire persistence in saves, volumetric smoke, rain→fluid accumulation, wind→fire coupling, snow/vegetation seasonality, Phase 11 deferrals (lateral load, rigid bodies), fear herding/personality, glass transmission, traffic graph, voltage/current model + switches/valves/drains/sewer, pump power coupling, day/night lamp switching, NPC-sight/fire coupling to the light field, remaining Phase 17 checklist items (materials polish, post-FX, GI experiments — pointless under SwiftShader on this VM), scenario panel/scoring/save (known-issues "Scenarios"))
 
-**Last completed task:** Session 013 (2026-09-13) — implemented the Phase 17 light field: `src/voxel/light.ts` (sky+block channels, incremental two-queue BFS with staleness re-check, chunk-init column fills + border/break/lit-boundary seeds, dynamic + static sources), greedy-mesher light signature + per-corner vertex AO → `aLight`/`aAO` attributes, voxel shader sky-access × AO + warm block terms, main wiring (tick budget, lamp/fire source sync, load-path reset), 19 tests (420 total) incl. the incremental ≡ recompute gold test, light benchmarks, in-page probes + day/night screenshots, harness Phase 17 section (written, never run), docs.
+**Last completed task:** Session 014 (2026-09-13) — implemented Phase 18: `src/scenario/engine.ts` + `src/scenario/definitions.ts` (pure), `EventBus.onAny`, main wiring, 24 tests (444 total), scenario benchmarks (≈0.11 µs/tick), in-page probe (first run), docs.
 
-**Current task:** None — session complete, work committed.
+**Current task:** None — session wrapped; open probe items handed to Session 015.
 
-**Blocked by:** Nothing. (Pending when the machine is idle: the harness runs listed in HANDOFF — two clean full runs for Phase 16, first runs ever for Phase 17.)
+**Blocked by:** Nothing blocking implementation. Pending: (a) Session 015 diagnostics — rescue/fire/demolition probe items; (b) the deferred harness runs on an idle machine (Phase 16 ×2, Phase 17 first run; Phase 18 section after it exists).
 
-**Next recommended action:** In the next idle window, run the deferred headless harness confirmations (they gate the Phase 16 and 17 sections — 8 + 5 checks — plus the two Phase 12/13 repointed night checks). Then finish Phase 17 with the cheap consumers of the new field — NPC night sight sampling local light, the inspector showing sky/block values, day/night lamp switching in the power sim — and move to Phase 18 (Scenario System, plan §118). Post-FX/GI/reflections stay deferred (SwiftShader software GL makes them meaningless on this VM).
+**Next recommended action:** Session 015: (1) instrument the rescue failure (dump victim id, `counter('victim')`, npc distances, `npcDied` events every ~2 s in a probe); (2) re-probe fire with containment (douse neighbor fires or force rain) and then demolition — if demolition still finds no ready candidate, dump per-candidate readiness; (3) fix what's real, retune what's hard; (4) write the Phase 18 harness section and add it to the deferred-run list; (5) then Phase 17 leftovers (NPC night sight on local light, inspector light readout, day/night lamp switching) or Phase 19 (Scripting, plan §119).
 
 ---
 
 # Session Log
+
+## Session 014 — 2026-09-13
+
+**Status:** Complete at its (honest) boundary — Phase 18 (Scenario System) implemented, unit-tested (444 green), wired, benchmarked, documented, committed as `[0.16.0]`. In-page probe ran once: flood + collapse verified live; rescue/fire/demolition have open diagnostic items (documented, not silent). Harness section deliberately deferred until those are resolved. VM-load policy respected: no full harness runs, one micro-bench file only.
+
+### Completed
+
+- [x] **Pure scenario engine** (`src/scenario/engine.ts`, ADR-002/005): declarative `ScenarioDef` (setup/objectives/triggers/failed/timeLimit), objectives with `done`/`failed`/`deadline` + `after` unlock gates (deadline clocks run only while unlocked), one-shot triggers, fixed per-tick evaluation order, completion requires ≥1 positive objective, guard-only objectives flip to done at completion. `ScenarioContext` gives conditions: tick counter, bus-event log queries (`events`, `eventsNear`, `eventsInBox`, `lastEventTick`, `eventsQuiet` — log capped 512, running-only), scratch counters, box material census (budgeted), NPC lookup. All world access through an injected `ScenarioIo` (journaled edits, ignite, forceWeather, ensureAround, spawnAt, setCounter, announce, sensors: leaks/lamps/burning) — main implements it over the live game, tests over fixtures.
+- [x] **`EventBus.onAny`** (`src/sim/events.ts`): any-event subscriptions run before typed handlers on emit; listenerCount includes them (additive; all existing tests untouched).
+- [x] **Site resolution** (`src/scenario/definitions.ts`, pure): `resolveSites(terrain)` enumerates every viable building via `planAt`/`lotSpec` (nearest-first from spawn), the water main (pump/tap/burst cell derived from `pipelineRoute`, dry non-crossing lane), and the generator block. `scenarioReady(id, world, sites)` validates the stage on the loaded world before start; `scenarioTarget` prefers houses for fire/rescue.
+- [x] **Five scenarios**: **flood** (burst the generated main; objective stop-the-leak + guard keep-water-off-the-power-plant; hint trigger), **fire** (ignite the nearest house low via `findFlammable` — skips water-adjacent and fully-sealed cells (fire sim smothers those instantly); douse before half the body is consumed; neighbor-box ignition guards), **collapse** (carve both ground wall courses → the Phase 11 support graph stages the real cascade; get-clear deadline, after-gated "collapse plays out" quiet-window objective, witness-survives guard), **demolition** (collapse-at-site or ¾-removed; guards: no explosions/fires in neighbor boxes, no casualties nearby), **rescue** (spawn a figure inside, board the doorway with brick; dig it out; the figure leaves on its own schedule; survives-guard).
+- [x] **main.ts wiring**: `resolveSites` once at boot; `ScenarioEngine` + `ScenarioIo` over the live game; `bus.onAny → engine.onGameEvent`; `startScenario` validates per candidate building nearest-first (rotating the sorted sites) so scenarios chain through the town; **J** cycles the registry; scenario tick last in the fixed step; HUD `SCEN title — [x] obj · [ ] obj · J next` + timed announcement line; `L` load stops the run; `__mw.scenario` (engine, sites, activeSites, ids, start, stop, notes).
+- [x] **Tests** (`tests/scenario.test.ts`, NEW — 24; **444 total**, 33 files): engine semantics (setup/announce/ticks, guard-only completion rules, fail reasons, unlocked-only deadlines, one-shot triggers, scenario-level fail + time limits, event queries incl. restart-clears-log, counters, box census) + every scenario end to end on fixture rigs wired like the game (bus ↔ engine, collapse edits applied, sims in main's order, lake/flat/wood-house/two-story fixtures) + site resolution against the real generator on seed 24680 (determinism, ordering, houses-for-fire/rescue, readiness rejection, all-five-buildable on a loaded generated world).
+- [x] **Benchmarks** (`benchmarks/scenario.bench.ts`, NEW): engine overhead ≈ 0.11 µs/tick, flat under a 512-event log — `docs/performance.md` (the only bench run this session, per the VM-load policy).
+- [x] **In-page probe** (`.verify/probe-p18.mjs`, one run, zero page errors): boot census (143 buildings, main present), HUD `SCEN` line renders, **flood complete** (leak registered → pump removed → depressurized → complete) and **collapse complete** (carve → real cascade → quiet window → complete, witness alive) verified end to end live; screenshots `p18-rescue/p18-fire/p18-collapse.png` in `.verify/artifacts/`.
+- [x] **Docs**: architecture "Scenario system (Phase 18)", known-issues "Scenarios (Phase 18)" (7 entries incl. the three open probe findings), performance scenario baselines, README (state 0–18, quickstart scenario paragraph + J key, layout), CHANGELOG `[0.16.0]`, this file + checklist.
+
+### Found and fixed during the session
+
+- **`buildContext` closure bug**: `eventsQuiet` called `self.lastEventTick` (no such method) — collapsed to a local `lastEventTick` closure.
+- **Guard-only scenarios completed instantly**: completion required only "all done-objectives are done" — with zero positive objectives `allDone` was vacuously true; completion now also requires ≥1 positive objective.
+- **`active` after stop**: exposed the def while idle, confusing the HUD contract — `active` now reports running scenarios only (title getter added for the final HUD line).
+- **Fixture bug (instructive)**: the test water main floated across the lake basin — the Phase 11 support graph correctly toppled the unsupported pump/pipes once the burst hole appeared, pruning the leak and insta-completing the flood scenario. The real generated main is buried/post-supported; the fixture now sits on solid ground. (Found by bisecting with probes rather than by test-first theory — the fixture, not the sim, was wrong.)
+- **`findFlammable` sealed-cell bug**: the first flammable cell in a box can be fully enclosed (corner under walls) — the fire sim smothers it on tick 1 and the fire scenario "completes" instantly. Skips sealed and water-adjacent cells now.
+- **Fire/demolition baselines counted terrain**: `solid0`/`air0` over the full box inflated by the ground pad (burning a whole house couldn't trip the half-consumed guard); baselines now use a `buildingBody` box (footprint, floor up, no pad/apron).
+
+### Open items (handed to Session 015 — all in-page-probe territory, unit tests are green)
+
+- **Rescue failed "the figure survives"**: the victim vanished mid-run (probe: started ✓, HUD ✓, boards dug ✓, then failed). Population maintenance only despawns past 80 cells, so something else removed the figure — or the spawn/counter path misfired. Instrument: dump victim id, `counter('victim')`, nearest-figure distances, and any `npcDied` bus events every ~2 s.
+- **Fire failed "keep it off the neighbors"**: grass lawns carry fire between houses fast — the neighbor-box ignition guard fired before the probe's (late) douse. Likely correct-but-hard; retune the probe (douse immediately / contain with rain) and consider whether lawn-spread is the intended difficulty.
+- **Demolition found no ready candidate**: after ~50 s of unattended neighbor fire during the collapse window, all rotations failed readiness. Re-probe with fire containment; if it persists, dump per-candidate readiness values.
+- **Harness Phase 18 section**: not yet written — encode it once the three items are resolved (expected shape: start → HUD line → stage action → poll status → complete; ~6 checks on `?seed=24680`).
+
+### Deferred deliberately
+
+- Headless harness runs (VM-load policy): Phase 16 ×2 confirmation, Phase 17 first run, Phase 18 section — all tracked in HANDOFF "Pending heavy work".
+- Phase 17 leftovers (cheap light-field consumers): NPC night sight on local light, inspector sky/block readout, day/night lamp switching in the power sim.
+- Scenario panel/scoring/save-restore, scenario selection UI beyond the J cycle (known-issues "Scenarios").
+- Phase 19 — Scripting (plan §119) is the next phase; the scenario engine's trigger/condition/action shape is deliberately aligned with it.
+
+### Tests
+
+- Unit tests: 444 passed (33 files; +24 scenario)
+- Integration: in-page probe (first run — flood + collapse green live; three open items documented); harness Phase 18 section pending; Phase 16/17 harness runs still deferred; manual GUI pass pending (user)
+- Typecheck: clean (strict) · Lint: clean · Prettier: clean · Build: succeeds
+
+### Benchmarks
+
+- Scenarios: engine ≈ 0.11 µs/tick (idle and under a 512-event log) — `docs/performance.md`
+
+### Architecture changes
+
+- New dir: `src/scenario/` (pure — engine + definitions, ADR-002).
+- `EventBus` gained `onAny` (additive; existing API unchanged).
+- main.ts: scenario io/start/HUD/J-cycle/load-stop; `__mw.scenario` debug hook.
+- Save format untouched (v2) — scenario state is transient; staged damage persists via the journal as normal edits.
+
+### Known issues
+
+- `docs/known-issues.md`: new "Scenarios (Phase 18)" section — open probe findings (rescue/fire/demolition), SwiftShader-relative tuning, unloaded-chunk blindness, grass fire spread, event-driven guards, one-at-a-time transient runs, HUD-only UI.
+
+### Next task
+
+- Task: Session 015 — the three probe diagnostics (instrumented), then the Phase 18 harness section; then Phase 17 cheap consumers or Phase 19 (Scripting).
+
+---
 
 ## Session 013 — 2026-09-13
 
@@ -1602,16 +1668,16 @@ _(Perception landed as Phase 13 (§111); the plan's Phase 12 scope was navigatio
 
 # Phase 18 — Scenario System
 
-- [ ] Scenario data model
-- [ ] Scenario loader
-- [ ] Scenario objectives
-- [ ] Scenario triggers
-- [ ] Scenario completion
-- [ ] Flood scenario
-- [ ] Fire scenario
-- [ ] Collapse scenario
-- [ ] Demolition scenario
-- [ ] Rescue scenario
+- [x] Scenario data model _(ScenarioDef/Objective/Trigger/Condition + ScenarioContext/ScenarioIo, `src/scenario/engine.ts`; Session 014)_
+- [x] Scenario loader _(site resolution from seeded town/main/plant + per-candidate readiness validation + `__mw.scenario.start`; Session 014)_
+- [x] Scenario objectives _(done/failed/deadline conditions with after-gates; guard-only objectives; HUD marks; Session 014)_
+- [x] Scenario triggers _(one-shot timed beats — hints/escalations; Session 014)_
+- [x] Scenario completion _(all positive objectives done + guards held; fail reasons; complete/failed engine events; Session 014)_
+- [x] Flood scenario _(burst main → stop the leak, keep water off the power plant; verified live in-page; Session 014)_
+- [x] Fire scenario _(house ignites low; douse before half-consumed; neighbor guards — in-page tuning item open; Session 014)_
+- [x] Collapse scenario _(carved ground floor → real Phase 11 cascade; get clear + quiet window + witness; verified live in-page; Session 014)_
+- [x] Demolition scenario _(level a building cleanly; collateral/casualty guards — in-page re-probe open; Session 014)_
+- [x] Rescue scenario _(figure trapped behind boarded door; dig out; survives — in-page diagnostic open; Session 014)_
 
 ---
 

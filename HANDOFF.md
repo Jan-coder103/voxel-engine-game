@@ -1,148 +1,222 @@
-# HANDOFF — Session 013 wrap (2026-09-13)
+# HANDOFF — Session 014 wrap (2026-09-13, evening)
 
-**Status: Phases 16 AND 17 are complete and committed.** This session
-committed Session 012's uncommitted Phase 16 (atmosphere, `[0.14.0]`)
-and implemented Phase 17's core — the **voxel light field**
-(`[0.15.0]`): sunlight columns + block light (lamps, fire, generators)
-with budgeted incremental BFS, mesher light + vertex-AO attributes,
-shader sky-access/block terms. **420 unit tests / 32 files green,
-typecheck/lint/prettier/build clean, light benchmarks recorded, in-page
-probes + day/night screenshots verify the render end to end (zero page
-errors).** The one standing deferral: **headless harness runs** (see
-"Pending heavy work" — the user asked to skip long/heavy runs on this
-VM until further notice). Next session: run those when the machine is
-idle, then the cheap light-field consumers or Phase 18.
+**Status: Phase 18 (Scenario System) is implemented, unit-tested, wired,
+benchmarked, documented, and committed as `[0.16.0]`.** 444 unit tests /
+33 files green, typecheck/lint/prettier/build clean, scenario
+micro-benchmarks recorded (≈0.11 µs/tick), docs updated. An in-page
+probe ran **once**: **flood and collapse are verified end to end in the
+live page** (start → play → complete, zero page errors, screenshots in
+`.verify/artifacts/p18-*.png`). **Three open items** came out of that
+run — rescue, fire-tuning, demolition-readiness — they are probe-side
+diagnostics, not unit failures, and they are the first task for
+Session 015. The Phase 18 harness section is deliberately **not written
+yet** (encode it after the three items are resolved).
 
 **⚠ First command of every shell: `export PATH="$HOME/.local/bin:$PATH"`
 (npm/node live in `~/.local/opt`, linked from `~/.local/bin`).**
 
 **⚠ The headless harness needs Playwright inside `.verify/`** (own
-`package.json` + gitignored `node_modules`):
-`cd .verify && npm install playwright@latest` restores it. Never
+`package.json` + gitignored `node_modules`). It is installed; never
 `npm install` at the repo root.
 
-**⚠ Before any harness/bench run: check `uptime` AND
-`ps aux --sort=-%cpu` for stale node/vite processes** (Sessions 012/013
-both lost time to orphaned probe processes). During a run: touch
-nothing (absolute rule).
+**⚠ Before any probe/harness/bench run: check `uptime` AND
+`ps aux --sort=-%cpu` for stale node/vite processes. During a run:
+touch nothing (absolute rule).** (Session 014 left NO dev server
+running — it was killed at wrap-up. Probe used `.verify/probe-p18.mjs`
+against `npm run dev` on :5173.)
 
 ## Pending heavy work (skip-for-now list — do these when idle)
 
-1. **Phase 16 harness confirmation** — `.verify/run.mjs` full run ×2
-   consecutive, all sections: Phase 16 section must be **8/8** (it ran
-   once pre-fix at 7/8; the three failures were fixed and
-   probe-verified), Phase 15 still 8/8, zero page errors. The Phase
-   12/13 night checks were repointed to `atmosphere.setTime` — they
-   should pass now.
-2. **Phase 17 harness first run** — the new Phase 17 section (5 checks:
-   sky columns, night lamp light, roofed-room dark + relight, fire
-   light, clock restore) was written and `node --check`ed this session
-   but **has never run**. Expect small calibrations (poll lengths are
-   SwiftShader-guessed; the lamp check needs the power revision to bump
-   at boot — verified in probes).
-3. **Benchmark re-runs on an idle machine** — atmosphere (0.025 ms tick,
-   recorded under load) and light (chunk arrival 13 ms, street edit 178
-   ms BFS total, lamp fill 4.4 ms/source, mesher +7%) both carry the
-   loaded-VM caveat in `docs/performance.md`.
-4. Manual GUI pass (user) — still pending since Phase 7.
+1. **Session 015 diagnostics (in-page probes, ~15–30 min each)** — the
+   three open Phase 18 items; see "First tasks tomorrow" below.
+2. **Phase 18 harness section** — write AFTER the diagnostics land
+   (expected shape: on `?seed=24680`, for each scenario: `__mw.scenario.start(id)`
+   → assert HUD `SCEN` line → perform the resolution page-side
+   (setVoxel water/dig/pump-removal/carve) → poll `engine.current` →
+   complete; ~6–8 checks). Then it joins the deferred-run list.
+3. **Phase 16 harness confirmation** — `.verify/run.mjs` full run ×2
+   consecutive: Phase 16 section must be 8/8, Phase 15 still 8/8, zero
+   page errors (carried since Session 012).
+4. **Phase 17 harness first run** — the 5-check Phase 17 section has
+   never run (carried since Session 013).
+5. **Benchmark re-runs on an idle machine** — atmosphere, light, and
+   utilities numbers carry loaded-VM caveats (scenario bench numbers
+   from this session are also load-~2 but tiny).
+6. Manual GUI pass (user) — pending since Phase 7.
 
-## What landed this session (Phase 17 — light field, plan §117)
+## What landed this session (Phase 18 — plan §118)
 
-1. **`src/voxel/light.ts`** (NEW, pure): two per-voxel channels —
-   **sky** (15 iff open column above; free downward propagation through
-   air; −1 lateral; water −2, glass −1; opaque blocks, leaves included →
-   tree shade) and **block** (sources at −1/step: lit lamps via power
-   `litPositions()` revision-gated diff, burning cells via fire
-   `burningList()` count-gated diff — main owns the sync; static
-   `MATERIAL_EMISSION` for generators). Storage = two lazy
-   `Uint8Array`s per Chunk (freed on unload; uninitialized chunks read
-   full-sky). Two-queue incremental BFS, budgeted 1200 pops/tick.
-   **Correctness pins**: removal pops re-check the cell's current level
-   (stale-entry bug), chunk init demotes orphaned 15s below
-   newly-generated blockers + runs a lit-boundary pass (both
-   streaming-order gaps), and the unit gold test proves incremental ≡
-   from-scratch recompute over 60 random edits on both channels.
-2. **Mesher**: `meshVolumeGreedy(volume, query, waterLevel?, light?)` —
-   per-face light sampled at the air cell, **part of the merge
-   signature**; per-quad-corner 3-sample vertex AO (opaque only);
-   emits `aLight` (vec2, /15) + `aAO` (float, /3). Face set unchanged —
-   greedy↔naive equivalence untouched. `buildVoxelGeometry` binds both.
-3. **Shader** (`voxelMaterial.ts`): `(ambient + sun·NdotL) × sky × ao`
-   with a 0.05 floor + `albedo · uBlockColor · block · ao`. Lamps light
-   night streets, fire lights rooms, caves are dark, water dims with
-   depth.
-4. **Wiring** (`main.ts`): LightField constructed before chunk
-   generation; `light.tick(LIGHT_POPS_PER_TICK)` per fixed step; lamp/
-   fire source sync; load path = `light.reset()+rescan()` + source
-   re-sync; HUD `· light qN`; `__mw.light`/`skyAt`/`blockLightAt`/
-   `scene` (scene exposure was added for render probes — keep, it's
-   DEV-only).
-5. **Tests**: +19 (`tests/light.test.ts`) → **420 total** (32 files).
-6. **Benchmarks** (`benchmarks/light.bench.ts`, NEW): numbers above;
-   mesher +7% for light+AO.
-7. **Docs**: architecture "Light field (Phase 17)", performance
-   baselines, known-issues "Lighting (Phase 17)" (8 entries) + Phase 16
-   superseded bullet, README 0–17, CHANGELOG `[0.15.0]`,
-   MICRO_WORLD_PROGRESS Session 013 + checklist + Milestone 14.
+1. **`src/scenario/engine.ts`** (NEW, pure): tick-driven evaluator.
+   `ScenarioDef` = setup + objectives + one-shot triggers + optional
+   scenario-level `failed`/`timeLimit`. Objectives: `done`/`failed`
+   conditions, `deadline` (ticks only while unlocked), `after` unlock
+   gate. Fixed per-tick order: triggers → scenario fail → objectives.
+   Completion needs ≥1 positive objective AND all done; guard-only
+   objectives (failed-without-done) never block and flip to done at the
+   end. `ScenarioContext` = ticks + bus-event log queries (events,
+   eventsNear, eventsInBox, lastEventTick, eventsQuiet; log capped 512,
+   recorded only while running) + scratch counters + box material
+   census (≤50k cells) + npcById. All world access via injected
+   `ScenarioIo` (journaled `edit`, `ignite`, `forceWeather`,
+   `ensureAround` chunk force-load, `spawnAt` → npc id, `setCounter`,
+   `announce`, sensors: leakCount/litCount/burningCount). Statuses
+   idle/running/complete/failed; `active` = running only; `title`
+   getter for the HUD's final line. Transient state — save format
+   untouched.
+2. **`src/scenario/definitions.ts`** (NEW, pure): `resolveSites(terrain)`
+   — all viable town buildings via `planAt`/`lotSpec` (nearest-first
+   from spawn), water main (pump/tap/burst from `pipelineRoute`; burst
+   = dry non-cable-crossing lane cell, y=h−2), generator block.
+   `scenarioReady` validates on the loaded world; `scenarioTarget`
+   prefers houses for fire/rescue. Five scenarios: flood (burst →
+   stop-the-leak + water-off-the-plant guard + hint), fire
+   (`findFlammable` skips water-adjacent AND fully-sealed cells;
+   douse-before-half-consumed via `buildingBody` baselines;
+   neighbor-box ignition guards), collapse (carve ground courses →
+   Phase 11 cascade; get-clear deadline; after-gated quiet-window;
+   witness-survives guard), demolition (collapse-at-site or ¾ removed;
+   neighbor-box explosion/fire guards; casualty guard), rescue (figure
+   spawned inside, doorway boarded with brick; distance-from-door done;
+   survives guard; dig hint).
+3. **`src/sim/events.ts`**: `EventBus.onAny` (runs before typed
+   handlers; listenerCount includes them). Additive; all old tests pass.
+4. **`src/main.ts` wiring**: `resolveSites` at boot; `ScenarioEngine` +
+   `ScenarioIo` over the live game (io.edit = the player's undoable
+   edit path); `bus.onAny → engine.onGameEvent`; **`startScenario(id)`**
+   tries candidate buildings nearest-first and **rotates past stages
+   that can no longer host the scenario** (readiness re-check per
+   candidate); **J** cycles the registry; scenario tick LAST in the
+   fixed step; HUD `SCEN … [x]/[!]/[ ]/[?] … J next` + announcement
+   line (600-tick freshness); `L` load stops the run;
+   `__mw.scenario` = { engine, sites, activeSites(), ids, start, stop,
+   notes }.
+5. **Tests** (`tests/scenario.test.ts`, NEW — 24 → **444 total**, 33
+   files): engine semantics + all five scenarios end to end on fixture
+   rigs wired like the game (bus ↔ engine, real collapse edits, sims in
+   main's order; lake/flat worlds, wood house + two-story fixtures,
+   pressurized water main) + real-generator site resolution on seed
+   24680 (determinism, ordering, readiness, all-five-buildable).
+6. **Benchmarks** (`benchmarks/scenario.bench.ts`, NEW): ≈0.11 µs/tick
+   idle and under a 512-event log — `docs/performance.md`.
+7. **Docs**: architecture "Scenario system (Phase 18)", known-issues
+   "Scenarios (Phase 18)" (7 entries incl. the open probe findings),
+   performance scenario baselines, README (state 0–18, quickstart
+   scenarios paragraph + J, layout), CHANGELOG `[0.16.0]`,
+   MICRO_WORLD_PROGRESS (Session 014 + status + checklist), HANDOFF
+   (this file).
 
-## Session 013 lessons (new ones only — see PROGRESS Session 012 for the rest)
+## First tasks tomorrow (Session 015) — the three open probe items
 
-- **Screenshots without pointer lock shoot through the overlay's 82%
-  black scrim** — a working bright scene reads as near-black. Click
-  first in every probe that screenshots (the harness always does).
-- **Write the recompute-equivalence gold test first** for any
-  queue-based incremental algorithm — both real light bugs (stale
-  removal cascades; streaming-order phantom/missing light) were
-  invisible to targeted fixtures and trivially visible to the property
-  test.
-- Probe fixtures can lie: a "flat world" generator that fills stone in
-  every chunk Y layer built an accidental slab at y=16–20, and a
-  reference world missing the lamp source — three false alarms before
-  the two real bugs. Dump the actual voxel column before theorizing.
-- vite-node may serve stale transformed modules — add a sentinel log
-  when probe output contradicts freshly-edited code.
+All three were found by `.verify/probe-p18.mjs` (run once; kept in
+`.verify/` for reuse). Unit tests are green throughout — these are
+live-world behaviors.
+
+1. **Rescue failed `The figure survives`** (victim vanished mid-run).
+   Facts: start ✓, HUD `SCEN` line ✓, victim spawn count read 16,
+   probe dug 11 BRICK cells around the door ✓, then within ~30 s the
+   `alive` guard fired (`npcById(counter('victim')) === undefined`).
+   Population `maintain()` only despawns past 80 cells (checked), and
+   house A sits near spawn — so the figure was removed another way OR
+   the spawn/counter path misfired. **Instrument**: after start, every
+   ~2 s dump `activeSites().buildings[0].spec.door`,
+   `__mw.scenario.engine` objective views, the victim's id via the
+   counter (engine.counters are private — read via a probe trigger or
+   track `__mw.npc.list()` ids vs. the post-start delta), each figure's
+   distance from the door, and any `npcDied` bus emissions. Suspects:
+   (a) npcDied via water sweep after the figure exited and wandered;
+   (b) the dig (11 cells!) triggered a structural collapse that
+   dropped/removed the interior stand → figure fell → ??? (NPC fall
+   lands or sweeps); (c) `spawnAt` failed silently (counter 0 →
+   insta-fail — would show immediately, which the timeline allows).
+2. **Fire failed `Keep it off the neighbors`** — grass lawns carry fire
+   between houses fast; the probe doused late (after a 2.5 s screenshot
+   wait) and only the target's body. Likely correct-but-hard. Retune the
+   probe: douse immediately, or `forceWeather('rain')` after ignition to
+   contain, or widen the douse to the block. Decide whether lawn-spread
+   difficulty is wanted (plan §57 likes it; the HUD hint could warn).
+3. **Demolition found no ready candidate** (`start('demolition')` →
+   false) after ~50 s of unattended neighbor fire during the collapse
+   window — plausibly the town block genuinely burned (rotation checked
+   all 143). Re-probe with fire containment (rain) right after the fire
+   scenario; if it still fails, dump per-candidate
+   `scenarioReady`-equivalent info via a small in-page loop (the
+   rotation lives in main's `startScenario`).
+
+Then: write the Phase 18 harness section (shape listed in "Pending
+heavy work"), add it to the deferred-run list, and proceed to Phase 17
+leftovers (NPC night sight sampling local light via the existing
+`lightLevel` option, inspector sky/block readout, day/night lamp
+switching in the power sim) or Phase 19 — Scripting (plan §119; the
+scenario engine's condition/trigger/action shape was deliberately
+aligned with it).
+
+## Session 014 lessons (new ones only)
+
+- **Fixture structural honesty**: a test main floating over the lake
+  basin was correctly toppled by the Phase 11 support graph once the
+  burst hole appeared — pruning the leak and insta-completing the flood
+  scenario. The sims were right; the fixture was a building code
+  violation. Bisect with throwaway probes instead of trusting either
+  side (`probe-flood.ts` → found in two runs).
+- **Instant-win hazards in staged content**: any setup that the live
+  sims can immediately undo (a fire staged in a sealed pocket is
+  smothered on tick 1; baselines inflated by terrain make
+  "half-consumed" unreachable; a guard-only objective set completes
+  vacuously) needs a validation pass that models the sim's rules
+  (`findFlammable` sealed/wet checks; `buildingBody` baselines;
+  ≥1-positive-objective completion rule).
+- **A failing engine tick order shows up as weird objective outcomes**
+  (deadlines expiring while locked, guards completing scenarios) —
+  pin evaluation-order semantics in unit tests before debugging
+  conditions themselves.
+- Probe logistics: `browser.newPage()` per probe stage gives a fresh
+  localStorage each time (no save carryover between probe pages);
+  screenshots need the pointer-lock click first (the overlay scrim
+  eats bright scenes — Session 013 lesson, re-confirmed).
 
 ## How to pick up (next session)
 
-1. Idle-window harness runs (the pending list above): `export
-PATH="$HOME/.local/bin:$PATH"`; check `uptime` + top-CPU; start
-   `npm run dev`; `cd .verify && node run.mjs`. Phase 17 section
-   expectations: lamp check needs a few seconds for the power rescan +
-   lamp BFS; the roofed-box and fire checks poll up to 20–25 s each.
-   Fix calibrations (never the sim) if a check races.
-2. After the runs pass: cheap Phase 17 consumers — NPC night sight
-   sampling local light (`lightLevel` option already exists in
-   `NpcSimOptions`), inspector sky/block readout, day/night lamp
-   switching in the power sim. Then **Phase 18 — Scenario System**
-   (plan §118): scenario data model, triggers, flood/fire/collapse/
-   demolition/rescue — the Phase 16 weather + Phase 17 light make the
-   showcase storm scenario directly stageable.
-3. Post-FX/GI/reflections/materials polish stay deferred (SwiftShader
-   software GL — revisit on real hardware or after Phase 22 WebGPU).
+1. `export PATH="$HOME/.local/bin:$PATH"`; check `uptime` +
+   top-CPU stragglers; `npm run dev` in background (log to /tmp);
+   `cd .verify && node probe-p18.mjs` (or a new instrumented probe) —
+   work the three items above.
+2. Keep the VM-load policy: no full harness runs; probes and the one
+   micro-bench file are the approved load class.
+3. After the diagnostics: retune/fix, re-run the probe clean, write
+   the harness section, update PROGRESS/known-issues, commit.
+4. Then Phase 17 cheap consumers or Phase 19 — Scripting.
 
-## Key design facts (for working on the light field)
+## Key design facts (for working on the scenario system)
 
-- Channels are 0–15 nibbles; `packedAt = sky<<4 | block` is the mesher
-  query contract. Opacity: air 0, glass 1, water 2, else registry
-  `opaque` ⇒ blocked; step cost `max(1, opacity)`; sky free-fall only
-  when level 15 + straight down + opacity 0.
-- Light is transient derived state: **save format untouched (v2)** —
-  loads reset+rescan; consequences (burn-outs, water) persist via the
-  journal as before.
-- Every light write marks the chunk (and boundary neighbors) mesh
-  dirty; remeshing rides the existing 3-chunks-per-frame budget.
-- `Chunk.lightSky/lightBlock` are the single storage location — do not
-  duplicate into World maps.
-- Determinism: fixed neighbor order, no RNG; the gold test pins
-  incremental ≡ recompute.
+- The engine is **pure and bus-agnostic**: main injects everything via
+  `ScenarioIo`; conditions get a per-tick `ScenarioContext`. Sims are
+  never touched directly — reads go through `io.world`/`io.npc`/
+  `io.sensors`, writes through `io.edit`/`io.ignite`/`io.forceWeather`
+  (edits ride the player's undoable path and autosave gate).
+- **Evaluation order per tick**: triggers (once each) → scenario
+  `failed` → `timeLimit` → objectives in declaration order (done wins
+  ties against failed within the same objective; a later objective's
+  failure overrides an earlier one's completion in the same tick).
+- **Rotation**: main's `startScenario` rotates the sorted buildings
+  array per candidate; each scenario definition closes over its
+  rotated `sites`, so `sites.buildings[0]` is always the staged target
+  (`__mw.scenario.activeSites().buildings[0]` from probes).
+- **Event log**: recorded only while running, capped 512 (shift on
+  overflow), cleared on start. `eventsQuiet(type, x, y, z, r, span)` =
+  no matching event within `span` ticks (last match ≤ ticks − span).
+- Determinism (ADR-005): no RNG anywhere in the scenario layer; all
+  loops fixed-order; same tick sequence ⇒ same run.
+- Scenario state is transient like fire/NPC state — `L` (load) stops
+  the run; staged damage persists via the edit journal as normal.
 
 ## Agreed approach (unchanged)
 
 - Single npm package at the repo root; TypeScript strict, Vite, Vitest
   node environment, ESLint flat + Prettier, CI on Node 22.
 - Pure code (`src/voxel/`, `src/creator/`, `src/sim/`, `src/npc/`,
-  `src/worldgen/`, `src/player/controller.ts`) stays free of three.js
-  and DOM (ADR-002); all three.js lives in `src/render/`.
+  `src/worldgen/`, `src/scenario/`, `src/player/controller.ts`) stays
+  free of three.js and DOM (ADR-002); all three.js lives in
+  `src/render/`.
 - Terrain/town/utilities are pure functions of (seed, coordinates);
   material IDs append-only; sims observe via chained World hooks and
   budget their ticks; NPC sims never write voxels; benchmarks and

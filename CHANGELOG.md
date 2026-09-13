@@ -4,6 +4,74 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.16.0] — 2026-09-13 — Phase 18 (Scenario system)
+
+### Added
+
+- **Scenario engine** (`src/scenario/engine.ts`, pure): a tick-driven
+  evaluator for declarative vignettes over the live sims — `setup`
+  staging, objectives with `done`/`failed`/`deadline` conditions and
+  `after` unlock gates (deadlines only tick while unlocked), one-shot
+  triggers for timed beats, scenario-level fail conditions and time
+  limits, and a scratch-counter store. Conditions read a context with
+  bus-event queries (counts, near-radius, in-box, quiet-for), box
+  material censuses, NPC lookups, and cheap sim sensors; all
+  world-touching goes through an injected `ScenarioIo` (journaled
+  edits, ignite, weather pinning, chunk force-loading, NPC spawn,
+  announcements). Guard-only objectives (fail conditions without a
+  completion condition) never block completion. Deterministic: no RNG,
+  fixed evaluation order.
+- **`EventBus.onAny`**: subscribe to every event type (the engine's
+  event log; also for future replay/statistics consumers).
+- **Five launch scenarios** (`src/scenario/definitions.ts`) staged from
+  pure seed-derived sites (town buildings, water main, generator — no
+  hardcoded coordinates): **flood** (the generated main bursts; stop
+  the leak, keep water off the power plant), **fire** (a house ignites;
+  douse it before half the structure is gone and before it jumps to
+  neighbors), **collapse** (the ground floor gives way; the Phase 11
+  support graph stages the real cascade; get clear, keep the witness
+  alive), **demolition** (level a building cleanly — no collateral, no
+  casualties), **rescue** (a figure is trapped behind boarded doors;
+  dig them out and the figure walks free on its own schedule).
+- **main.ts wiring**: `J` cycles the scenario registry;
+  `startScenario` validates per candidate building nearest-first so
+  scenarios chain through the town (burned/soaked stages are skipped);
+  the scenario tick runs last in the fixed step; HUD `SCEN` line with
+  objective marks `[x]/[!]/[ ]/[?]` and timed announcements; `L` (load)
+  stops the run; `__mw.scenario` debug hook (engine, sites, active
+  sites, start/stop, notes).
+- **Tests** (`tests/scenario.test.ts`, NEW — 24): engine semantics
+  (setup/announce/ticks, completion vs guard-only, fail reasons,
+  unlocked-only deadlines, one-shot triggers, event queries, counters,
+  restart) and every scenario end to end on fixture rigs wired like
+  the real game (bus ↔ engine, collapse edits, sims in main's order) —
+  flood burst/leak/cut/pump-removal + plant guard, fire douse and
+  burn-down and neighbor-jump, collapse cascade + settle window +
+  witness guard, demolition clean-raise + collateral guard, rescue
+  board/dig/free-walk, plus site resolution against the real generator
+  (determinism, ordering, readiness, all-five-buildable on seed
+  24680). **444 tests total** (33 files).
+- **Benchmarks** (`benchmarks/scenario.bench.ts`, NEW): the engine's
+  own overhead ≈ 0.11 µs/tick, flat under a 512-event log —
+  `docs/performance.md`.
+- **Docs**: architecture "Scenario system (Phase 18)", known-issues
+  "Scenarios (Phase 18)" (incl. open probe findings), performance
+  scenario baselines, README, this file, PROGRESS.
+
+### Verification status (honest)
+
+- Unit: 444 green; typecheck/lint/prettier/build clean.
+- In-page probe (`.verify/probe-p18.mjs`, one run): **flood and
+  collapse complete end to end in the live page**, HUD line and notes
+  render, zero page errors. **Open**: rescue (victim vanished — needs
+  an instrumented probe), fire (neighbor-jump guard fired before the
+  douse — tuning or containment), demolition (no ready building after
+  the unattended fire — re-probe with containment). Details in
+  `docs/known-issues.md` "Scenarios (Phase 18)".
+- **Deferred**: the Phase 18 harness section (to be written after the
+  three probe items are resolved) and all harness confirmation runs —
+  VM-load policy, tracked in HANDOFF.
+
 ## [0.15.0] — 2026-09-13 — Phase 17 (Light: the voxel light field)
 
 ### Added
