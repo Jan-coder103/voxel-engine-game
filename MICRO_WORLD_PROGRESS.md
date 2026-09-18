@@ -31,19 +31,19 @@
 
 ## Overall Phase
 
-**Current phase:** Phase 18 (Scenario System) — **core complete, live-verified end to end** (`[0.16.0]` + probe-fix release `[0.16.1]`): all five scenarios (flood, fire, collapse, demolition, rescue) start, play, and complete in the live page on seed 24680 with zero page errors. Session 015 root-caused and fixed the three Session 014 probe findings: (1) **target selection** — `pickNearest` compared stringified distance keys, staging scenarios ~100 cells out (the rescue victim despawned on tick 1, outside the 80-cell despawn radius); `scenarioTarget` is positional now and the rotation contract is real; (2) **fire staging** — the blaze ignited the lawn (the outer box reaches the grass apron; ≈1 cell/tick), unwinnable by construction; setup/readiness now scan the building body and the neighbor guard watches neighbor structures (bodies), tolerating scorched lawns; (3) **demolition readiness** — a casualty of the first two, now starts and completes. 28 scenario tests (**448 total**, 33 files), Phase 18 harness section written (first run deferred), docs updated.
+**Current phase:** Phase 19 (Scripting) — **core complete, live-verified** (`[0.17.0]`), on top of Phase 18's probe-fix release `[0.16.1]` (all five scenarios live-verified end to end on seed 24680, zero page errors). Phase 19: pure script engine (`src/script/engine.ts`) — event triggers (bus type + radius/box filters, fired synchronously in emission order), rising-edge condition triggers, `if`/`cooldown`/`maxFires` gates, actions through the same `ScenarioIo` the scenarios use, engine-level shared variables and tick timers (`after`/`every`), capped event log with scenario-style queries, budgeted box censuses. main wiring (`attach` + `bus.onAny` + tick before the scenario tick), `__mw.scripts` hook. 10 tests (**458 total**, 34 files), micro-benchmarks (≈0.39 µs/tick loaded, ≈0.49 µs/event), in-page probe verified all mechanisms live. Programmatic surface only (console UI future work — known-issues "Scripting").
 
-**Current milestone:** Milestones 1–14 met (1–13 in earlier phases; 14 = the world is lit, Phase 17). Phase 18 adds the scenario layer; no new milestone gate defined for it in the checklist (plan §118 has no gate criteria).
+**Current milestone:** Milestones 1–14 met (1–13 in earlier phases; 14 = the world is lit, Phase 17). Phases 18–19 add the scenario and scripting layers; the plan defines no new gate criteria for either.
 
-**Overall completion:** ~74% (Phases 0–18 done; deferred: NPC inventory, hunger consequences, NPC wading/swimming, fire persistence in saves, volumetric smoke, rain→fluid accumulation, wind→fire coupling, snow/vegetation seasonality, Phase 11 deferrals (lateral load, rigid bodies), fear herding/personality, glass transmission, traffic graph, voltage/current model + switches/valves/drains/sewer, pump power coupling, day/night lamp switching, NPC-sight/fire coupling to the light field, remaining Phase 17 checklist items (materials polish, post-FX, GI experiments — pointless under SwiftShader on this VM), scenario panel/scoring/save (known-issues "Scenarios"), grass fire-rate tuning (Phase 10 question))
+**Overall completion:** ~75% (Phases 0–19 done; deferred: NPC inventory, hunger consequences, NPC wading/swimming, fire persistence in saves, volumetric smoke, rain→fluid accumulation, wind→fire coupling, snow/vegetation seasonality, Phase 11 deferrals (lateral load, rigid bodies), fear herding/personality, glass transmission, traffic graph, voltage/current model + switches/valves/drains/sewer, pump power coupling, day/night lamp switching, NPC-sight/fire coupling to the light field, remaining Phase 17 checklist items (materials polish, post-FX, GI experiments — pointless under SwiftShader on this VM), scenario panel/scoring/save, script console/UI, grass fire-rate tuning (Phase 10 question))
 
-**Last completed task:** Session 015 (2026-09-18) — diagnosed and fixed the three open Phase 18 probe items (target-selection string bug, lawn-fire staging, neighbor guards on bodies), exposed `__mw.scenario.target()`, +4 tests (448 total), Phase 18 harness section written (run deferred), all five scenarios verified live end to end, committed as `[0.16.1]`.
+**Last completed task:** Session 015 (2026-09-18) — two releases: `[0.16.1]` root-caused and fixed the three open Phase 18 probe items (target-selection string bug, lawn-fire staging, neighbor guards on bodies) and verified all five scenarios live; `[0.17.0]` implemented Phase 19 Scripting (engine + wiring + 10 tests + benchmarks + live probe).
 
-**Current task:** None — session wrapped; next is Phase 19 (Scripting, plan §119).
+**Current task:** None — session wrapped; next is Phase 20 (LLM Integration) per the plan, or the Phase 21/22 performance tracks — but see Next recommended action.
 
 **Blocked by:** Nothing blocking implementation. Pending: the deferred harness runs on an idle machine (Phase 16 ×2 confirmation, Phase 17 first run, Phase 18 first run) and benchmark re-runs.
 
-**Next recommended action:** Phase 19 — Scripting (plan §119): the event/condition/action layer over the existing bus + scenario engine (triggers, conditions, actions, variables, timers), exposed as a creator-mode surface. The scenario engine's shape was deliberately aligned with it. Cheap Phase 17 consumers (NPC night sight on local light, inspector light readout, day/night lamp switching) can ride along or wait.
+**Next recommended action:** Phase 20 (plan §120) is LLM integration ("only after the deterministic simulation is mature") — it wants network access and a model endpoint, which this VM's setup hasn't provided; if it stays out of reach, jump to Phase 21 (Performance profiling) or Phase 22 (WebGPU compute — SwiftShader-limited on this box), or shore up Phase 17's cheap leftovers (NPC night sight on local light, inspector light readout, day/night lamp switching). The deferred harness runs are the other standing item.
 
 ---
 
@@ -51,55 +51,62 @@
 
 ## Session 015 — 2026-09-18
 
-**Status:** Complete — the three open Phase 18 probe items root-caused, fixed, and verified live (all five scenarios now complete end to end in-page, zero page errors). 448 unit tests green, typecheck/lint/prettier/build clean. Phase 18 harness section written (first run deferred per the VM-load policy). Committed as `[0.16.1]`.
+**Status:** Complete — two releases. `[0.16.1]`: the three open Phase 18 probe items root-caused (all real Phase 18 bugs), fixed, and verified live — **all five scenarios now complete end to end in-page, zero page errors**. `[0.17.0]`: **Phase 19 (Scripting)** implemented — pure script engine (event/condition triggers, gates, actions, variables, timers), main wiring, `__mw.scripts` hook, 10 tests (**458 total**, 34 files), micro-benchmarks, live probe (all mechanisms verified acting in the real page). Typecheck/lint/prettier/build clean. Phase 18 harness section written (first run deferred per the VM-load policy).
 
 ### Completed
 
-- [x] **Instrumented rescue diagnostics** (4 probe rounds in `.verify/`): the scenario failed at `t=1` with the victim id set but no `npcDied` event, the figure absent from the sim, and the boards reading AIR at the door the probe inspected. Same-turn instrumentation + a monkey-patched `maintain()` caught the despawn: **the victim spawned ~81 cells from the player and was distance-despawned on the first tick** — the rescue had been staged on the wrong house entirely.
-- [x] **Root cause 1 — target selection (real Phase 18 bug)**: `pickNearest` compared stringified `"distance,x,z"` keys (`"100,-75,-30" < "8,-3,5"`), so scenario targets landed on far buildings (the fire staged on a distant house too, which is why the session-014 probe saw "the" house burn and douse attempts miss). Replaced with **positional selection**: `scenarioTarget` = first suitable entry in the (rotated, nearest-first) array — which also fixes the latent design flaw that a correct proximity scan would ignore the rotation entirely and restage the same global-nearest building for every candidate. Rotation-contract + regression unit tests added.
-- [x] **Root cause 2 — fire staged on the lawn (real Phase 18 bug)**: ignition-timeline probe showed every `fireIgnited` at lawn level (y=baseY−1) racing outward at ≈1 cell/tick — `findFlammable` scanned the outer box, which reaches the grass apron, so the "house fire" was a lawn fire and the neighbor-box guard tripped in ~10 ticks (unwinnable by construction; the unattended blaze also explains session 014's demolition "no ready candidate"). Setup and `scenarioReady('fire')` now scan the **building body** (footprint, floor up).
-- [x] **Root cause 3 — neighbor guards gated on lawn-level boxes**: the fire/demolition guards now count `fireIgnited` inside neighbor **bodies** (structures); scorched lawns in the box margin are tolerated. Verified winnable with a 4 s human-ish reaction delay (douse at t≈55 with 82 cells burning → complete, neighbors held).
-- [x] **`__mw.scenario.target()`** (main.ts): exposes the staged site — fire/rescue prefer houses, so it is not necessarily `buildings[0]`; probes/HUD-adjacent code read the truth.
-- [x] **Tests** (+4 → 28 in file, **448 total**, 33 files): rotation contract over resolved sites, positional target selection (far-first array wins), body-only fire ignition, lawn-tolerant neighbor guard.
-- [x] **In-page verification** (`probe-p18-chain2.mjs`, zero page errors): **rescue complete** (boards BRICK at the house door, dug 2, figure walks free, no deaths), **fire complete** (interior blaze, doused, all three objectives done, zero neighbor hits), **collapse complete** (carve → cascade → quiet window, witness safe), **demolition complete** (raze 331 cells), flood re-verified from session 014; screenshots `p18-rescue-fixed/p18-fire-fixed/p18-collapse-fixed.png`.
-- [x] **Phase 18 harness section** (`.verify/run.mjs`): 8 checks across two pages (hook+sites census; rescue stage+HUD+complete; flood burst→pump; fire douse; collapse clear+quiet; demolition raze) — written, `node --check`ed, **first run deferred** (VM-load policy).
-- [x] **Docs**: known-issues "Scenarios (Phase 18)" rewritten (three findings resolved with root causes; lawn-spread note now about Phase 10 grass tuning), architecture scenario section (positional targeting, body staging/body guards, `target()`), CHANGELOG `[0.16.1]`, this file + HANDOFF.
+- [x] **`[0.16.1]` — instrumented rescue diagnostics** (4 probe rounds in `.verify/`): the scenario failed at `t=1` with the victim id set but no `npcDied` event, the figure absent from the sim, and the boards reading AIR at the door the probe inspected. Same-turn instrumentation + a monkey-patched `maintain()` caught the despawn: **the victim spawned ~81 cells from the player and was distance-despawned on the first tick** — the rescue had been staged on the wrong house entirely.
+- [x] **`[0.16.1]` — root cause 1, target selection (real Phase 18 bug)**: `pickNearest` compared stringified `"distance,x,z"` keys (`"100,-75,-30" < "8,-3,5"`), so scenario targets landed on far buildings (the fire staged on a distant house too — the session-014 probe doused the wrong building). Replaced with **positional selection**: `scenarioTarget` = first suitable entry in the (rotated, nearest-first) array — which also fixes the latent design flaw that a correct proximity scan would ignore the rotation entirely and restage the same global-nearest building for every candidate. Rotation-contract + regression unit tests added.
+- [x] **`[0.16.1]` — root cause 2, fire staged on the lawn (real Phase 18 bug)**: ignition-timeline probe showed every `fireIgnited` at lawn level (y=baseY−1) racing outward at ≈1 cell/tick — `findFlammable` scanned the outer box, which reaches the grass apron, so the "house fire" was a lawn fire and the neighbor-box guard tripped in ~10 ticks (unwinnable by construction; the unattended blaze also explains session 014's demolition "no ready candidate"). Setup and `scenarioReady('fire')` now scan the **building body** (footprint, floor up).
+- [x] **`[0.16.1]` — root cause 3, neighbor guards gated on lawn-level boxes**: the fire/demolition guards now count `fireIgnited` inside neighbor **bodies** (structures); scorched lawns in the box margin are tolerated. Verified winnable with a 4 s human-ish reaction delay (douse at t≈55 with 82 cells burning → complete, neighbors held).
+- [x] **`[0.16.1]` — `__mw.scenario.target()`** (main.ts): exposes the staged site — fire/rescue prefer houses, so it is not necessarily `buildings[0]`; probes/HUD-adjacent code read the truth.
+- [x] **`[0.16.1]` — in-page verification** (`probe-p18-chain2.mjs` + `probe-p18-fire-human.mjs`, zero page errors): **rescue complete** (boards BRICK at the house door, dug 2, figure walks free, no deaths), **fire complete** (interior blaze, doused, all three objectives done, zero neighbor hits), **collapse complete** (carve → cascade → quiet window, witness safe), **demolition complete** (raze 331 cells), flood re-verified from session 014; screenshots `p18-*-fixed.png`. **Phase 18 harness section written** (`.verify/run.mjs`, 8 checks, two pages) — first run deferred.
+- [x] **`[0.17.0]` — pure script engine** (`src/script/engine.ts`, ADR-002/005): `ScriptDef` = triggers; a trigger fires on bus **events** (`on`: type + radius/box filter, synchronously inside `onGameEvent` in emission order) or on a **condition's rising edge** (`when`, per tick in script-load then declaration order); gates `if` (fire-time; false swallows an event trigger's event) / `cooldown` / `maxFires`; **actions** are calls on the scenario `ScenarioIo` (journaled edits, ignite, weather, spawnAt, announce). Engine-level shared numeric **variables**, **timers** (`after` one-shot / `every` repeating, cancellable), capped event log (512, recorded only while scripts are loaded) with scenario-style queries, budgeted `countInBox`. Per-tick order: due timers → condition triggers. Deterministic (no RNG, fixed iteration order); not saved (creator logic — `L` does not stop them). `attach(io)` stores the io event triggers need between ticks.
+- [x] **`[0.17.0]` — main wiring**: `scripts.attach(scenarioIo)` + `bus.onAny → onGameEvent` right after the scenario wiring; `scripts.tick(scenarioIo)` just before `scenario.tick` in the fixed step (a script reacting to this step's events stages the world; the scenario tick, last as ever, sees the result); `__mw.scripts` = { engine, load, unload, clear, after, every, variable, setVariable }.
+- [x] **`[0.17.0]` — tests** (`tests/script.test.ts`, NEW — 10; **458 total**, 34 files): event dispatch + filters, gates (if/cooldown/maxFires), rising-edge re-arm, shared variables + setup, timer semantics and ordering (timers before condition triggers in the same tick), reload/unload/clear state, event-log queries, end-to-end vignette over the real fire sim (ignite → script wets the ground → fire snuffs).
+- [x] **`[0.17.0]` — benchmarks** (`benchmarks/script.bench.ts`, NEW): tick with a loaded script ≈ 0.39 µs/tick; event fire under a 512-entry log ≈ 0.49 µs/event; timers-only early exit ≈ 0.05 µs/tick — `docs/performance.md`.
+- [x] **`[0.17.0]` — in-page probe** (`.verify/probe-p19.mjs`, zero page errors): live-world scripts — fire watcher (event trigger + `if` gate + counter), rising-edge reactor (both announcements landed in the notes array), one-shot `after` and repeating `every` timers (heartbeat counted at tick 60 of 100 elapsed) — all verified acting in the real page.
+- [x] **Docs**: known-issues "Scenarios (Phase 18)" rewritten (findings closed; lawn-rate → Phase 10 tuning) + new "Scripting (Phase 19)" section (6 entries), architecture "Scripting (Phase 19)" + scenario section updates (positional targeting, body staging/guards, `target()`), performance script baselines, README (state 0–19, scripting paragraph, layout), CHANGELOG `[0.16.1]` + `[0.17.0]`, this file + HANDOFF.
 
 ### Probe-side lessons (for future sessions)
 
-- **Insta-fails masquerade as mid-run failures**: the session-014 probe never polled status before its dig, so a t=1 failure read as "vanished mid-run". Poll `engine.current` immediately after any staged start.
+- **A string-keyed "tuple" comparator is a real bug class**: `${d},${x},${z}` sorts lexicographically — `"100,…"` < `"8,…"`. Any nearest-first code building sort keys must compare numerically (tuple-by-tuple), not as strings. The probes had "verified" around this for a full session because flood/collapse completed anyway.
+- **Insta-fails masquerade as mid-run failures**: the session-014 probe never polled `engine.current` before its dig, so a t=1 failure read as "vanished mid-run". Poll status immediately after any staged start; instrument with same-turn reads (start + state dump in ONE `evaluate`) before round-trip sampling.
+- **Silent removals need patched sims**: `maintain()`'s distance despawn emits no event; when an NPC vanishes without `npcDied`, monkey-patch `maintain`/`tick` (prototype-level, runtime) to log removals and centers.
+- **Scenario boxes reach the terrain**: a building's outer box includes lawn-level courses; guards on "the building" must use the body box (footprint, floor up). Grass burns at ≈1 cell/tick — any fire guard measured in ticks that a lawn can trip is unwinnable.
 - **`activeSites().buildings[0]` was never the contract** — the staged target is `scenarioTarget`'s pick; use `__mw.scenario.target()` (now exposed) instead of guessing.
-- A scenario fail should be diagnosed with the engine's own counters (TS-private is runtime-visible) + `bus.on('npcDied')` loggers; `maintain()`'s distance despawn is silent (no event) — patch it when NPC vanishings need explaining.
-- Grass at ≈1 cell/tick means any lawn-touching fire guard measured in ticks is unwinnable; gate on structures, not proximity boxes.
+- A 345-cell fire drags this VM to ~10 fixed steps/s — timer-wall-clock assertions in probes must account for the load the scenario itself creates (douse before measuring heartbeats).
 
 ### Deferred deliberately
 
 - Headless harness runs (VM-load policy): Phase 18 first run (section written this session), Phase 16 ×2 confirmation, Phase 17 first run — all tracked in HANDOFF "Pending heavy work".
-- Benchmark re-runs on an idle machine (no new bench files this session; scenario numbers unchanged).
-- Grass fire-rate tuning (Phase 10 material-table question), scenario panel/scoring/save, Phase 17 cheap consumers.
+- Benchmark re-runs on an idle machine (script bench numbers are load-~2 but tiny).
+- Grass fire-rate tuning (Phase 10 material-table question), scenario panel/scoring/save, script console/UI (known-issues "Scripting"), Phase 17 cheap consumers.
 
 ### Tests
 
-- Unit tests: 448 passed (33 files; +4 scenario)
-- Integration: all five scenarios verified live end to end (probe chain + human-timing fire check, zero page errors); Phase 18 harness section written, never run; Phase 16/17 harness runs still deferred; manual GUI pass pending (user)
+- Unit tests: 458 passed (34 files; +4 scenario regression, +10 script)
+- Integration: all five scenarios verified live end to end (probe chain + human-timing fire check, zero page errors); script mechanisms verified live (probe-p19, zero page errors); Phase 18 harness section written, never run; Phase 16/17 harness runs still deferred; manual GUI pass pending (user)
 - Typecheck: clean (strict) · Lint: clean · Prettier: clean · Build: succeeds
 
 ### Benchmarks
 
-- None re-run (VM-load policy; no sim hot-path changes — scenario tick unchanged at ≈0.11 µs/tick from session 014)
+- Scripting: tick ≈ 0.39 µs/tick (1 script, 2 condition checks); event fire ≈ 0.49 µs/event (512-entry log); timers-only early exit ≈ 0.05 µs/tick — `docs/performance.md` (loaded-VM caveat)
+- Scenarios: unchanged (≈ 0.11 µs/tick, session 014)
 
 ### Architecture changes
 
 - `src/scenario/definitions.ts`: `pickNearest` removed; `scenarioTarget` positional (rotation contract); fire staging/readiness on `buildingBody`; fire/demolition neighbor guards on body boxes.
-- `src/main.ts`: `activeScenarioTarget` tracked; `__mw.scenario.target()` exposed (DEV-only).
+- New dir: `src/script/` (pure — script engine, ADR-002); imports the scenario layer's io/box types (type-only).
+- `src/main.ts`: `activeScenarioTarget` tracked + `__mw.scenario.target()`; `ScriptEngine` attached to the scenario io, `bus.onAny` wiring, fixed-step tick before scenarios, `__mw.scripts` hook (DEV-only).
 
 ### Known issues
 
-- `docs/known-issues.md` "Scenarios (Phase 18)": probe findings closed; lawn-fire-rate tuning noted as a Phase 10 question; remaining entries unchanged.
+- `docs/known-issues.md`: "Scenarios (Phase 18)" findings closed; "Scripting (Phase 19)" added (programmatic surface only, numeric variables, fire-and-forget event triggers, scenario-gated announcements, unsaved scripts, timer/unload asymmetry).
 
 ### Next task
 
-- Task: Phase 19 — Scripting (plan §119): events/triggers/conditions/actions/variables/timers over the bus + scenario engine, as a creator-mode surface.
+- Task: Phase 20 (LLM Integration, plan §120) if a model endpoint is reachable from this VM — else Phase 21 (Performance profiling) or Phase 22 (WebGPU compute, SwiftShader-limited); Phase 17 cheap consumers can ride along. Deferred harness runs remain the standing item.
 
 ---
 

@@ -26,6 +26,7 @@ import { PlumbingSim } from './voxel/plumbing';
 import { AtmosphereSim, type Weather } from './sim/atmosphere';
 import { NpcSim } from './npc/npc';
 import { ScenarioEngine, type ScenarioIo } from './scenario/engine';
+import { ScriptEngine } from './script/engine';
 import {
   SCENARIO_IDS,
   SCENARIO_TITLES,
@@ -503,6 +504,16 @@ function main(): void {
   };
   bus.onAny((event) => scenario.onGameEvent(event));
 
+  // --- Scripts (Phase 19) ---------------------------------------------------
+  // Continuous rules over the same io the scenarios act through: event
+  // subscriptions fire between ticks (bus order), conditions poll on the
+  // rising edge, and timers/variables are engine-level. Creator logic,
+  // not world state — a load (L) does not stop them. The surface is
+  // programmatic for now (the __mw.scripts hook); a console comes later.
+  const scripts = new ScriptEngine();
+  scripts.attach(scenarioIo);
+  bus.onAny((event) => scripts.onGameEvent(event));
+
   // The sites a running scenario was staged from, plus the staged target
   // itself (fire/rescue prefer houses, so the target is not necessarily
   // buildings[0]) — exposed for HUD-adjacent debugging.
@@ -930,6 +941,10 @@ function main(): void {
       // NPCs join the same fixed step (Phase 12): schedule, paths,
       // movement, population. Population centers on the player.
       npc.tick(player.position);
+      // Scripts (Phase 19) run before the scenarios: a script reacting
+      // to this step's events stages the world, and the scenario tick
+      // (last, as ever) sees the result in the same instant.
+      scripts.tick(scenarioIo);
       // Scenarios (Phase 18) evaluate last: they see this step's fires,
       // floods, collapses, and NPC moves in the same instant.
       scenario.tick(scenarioIo);
@@ -1159,6 +1174,18 @@ function main(): void {
         start: (id: ScenarioId) => startScenario(id),
         stop: () => scenario.stop(),
         notes: scenarioNotes,
+      },
+      scripts: {
+        engine: scripts,
+        load: (def: Parameters<ScriptEngine['load']>[0]) => scripts.load(def, scenarioIo),
+        unload: (id: string) => scripts.unload(id),
+        clear: () => scripts.clear(),
+        after: (ticks: number, run: Parameters<ScriptEngine['after']>[1]) =>
+          scripts.after(ticks, run),
+        every: (ticks: number, run: Parameters<ScriptEngine['every']>[1]) =>
+          scripts.every(ticks, run),
+        variable: (name: string) => scripts.variable(name),
+        setVariable: (name: string, value: number) => scripts.setVariable(name, value),
       },
       town: {
         anchors: town,

@@ -337,3 +337,22 @@ measured in those sims' own baselines.
 - Benchmarks run on whatever machine invokes them; treat cross-machine
   comparisons as noise until the planned benchmark serialization
   (Phase 23) exists.
+
+## Baselines — scripting (`benchmarks/script.bench.ts`)
+
+2026-09-18, dev VM (2–3 cores, load ~2; treat absolutes as
+machine-relative). The script engine sits next to the scenario tick in
+the fixed step and on the bus's `onAny` path, so both costs must be
+noise.
+
+| Scene                                             | ≈ time          |
+| ------------------------------------------------- | --------------- |
+| tick, 1 script / 2 rising-edge condition checks   | ≈ 0.39 µs/tick  |
+| event fire, 512-entry log (gate + log + counters) | ≈ 0.49 µs/event |
+| tick, timers only, no scripts loaded (early exit) | ≈ 0.05 µs/tick  |
+
+Reading: the scripting layer is free at game scales — a few loaded
+scripts cost well under 1 µs per fixed step, and event-trigger dispatch
+is sub-µs per bus emission even with the log at its cap. As with
+scenarios, the actions themselves (edits, spawns) cost what the systems
+they invoke cost.

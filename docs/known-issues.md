@@ -379,17 +379,17 @@ milestone goes here before it goes to the backlog.
   (1) **Rescue failed "the figure survives"**: root cause was target
   selection, not the victim — `pickNearest` compared stringified
   `"distance,x,z"` keys, so `"100,…"` sorted before `"8,…"` and the
-  scenario staged on a house ~100 cells from spawn, *outside* the
+  scenario staged on a house ~100 cells from spawn, _outside_ the
   NPCs' 80-cell despawn radius; `maintain()` silently distance-despawned
   the victim on tick 1 (insta-fail at `t=1`, no `npcDied` event).
   Selection is positional now (`scenarioTarget` = first suitable entry
   in array order, which also makes the rotation contract real). (2)
   **Fire failed "keep it off the neighbors"**: staging, not difficulty —
   `findFlammable` scanned the outer box, whose y-courses reach the grass
-  apron, so the "house fire" ignited the *lawn* (≈1 cell/tick across
+  apron, so the "house fire" ignited the _lawn_ (≈1 cell/tick across
   open grass; neighbor-box hits within ~10 ticks — unwinnable by
   construction). Setup now ignites the building body (footprint, floor
-  up), and the neighbor guard watches neighbor *bodies* rather than
+  up), and the neighbor guard watches neighbor _bodies_ rather than
   boxes that reach lawn level: verified winnable with a 4 s human-ish
   reaction delay. (3) **Demolition found no ready candidate**: a
   casualty of the same two bugs (wrong target, uncontained lawn fire) —
@@ -397,7 +397,7 @@ milestone goes here before it goes to the backlog.
   end to end live, zero page errors.
 - **Lawn fire spread is real and fast.** Grass carries fire at roughly
   a cell per tick; the fire/demolition guards now tolerate scorched
-  lawns (they gate on neighbor *structures* only), but an unattended
+  lawns (they gate on neighbor _structures_ only), but an unattended
   blaze still cascades block-wide eventually (the plan §57 fire-ecology
   chain, arriving early). Slowing grass is a Phase 10 tuning question.
 - **Scenario tuning is SwiftShader-relative.** Deadlines and hint
@@ -419,6 +419,29 @@ milestone goes here before it goes to the backlog.
 - **No scenario UI beyond the HUD line.** Objectives render as one
   HUD line (`SCEN … [x]/[!]/[ ]` plus the latest announcement); a
   proper panel, scenario selection menu, and scoring are deferred.
+
+## Scripting (Phase 19)
+
+- **Programmatic surface only.** Scripts load through the
+  `__mw.scripts` hook (or any code holding the engine); there is no
+  in-game console, text format, or node UI yet — the plan §65 visual
+  logic board is explicitly future work.
+- **Variables are numbers only.** The shared store maps names to
+  numbers (deterministic, save-free); scripts that need strings or
+  structure encode them client-side.
+- **Event triggers are fire-and-forget.** A false `if` gate swallows
+  the triggering event (events are instantaneous); rules that must
+  re-check later belong on `when` (rising edge). There is no event
+  queue or retry.
+- **Script announcements ride the scenario note channel**, which the
+  HUD currently shows only while a scenario runs; a script-only run
+  announces invisibly (the notes array still records it).
+- **Scripts are not saved.** They are creator logic, not world state:
+  `L` (load) does not stop them and they do not persist across page
+  reloads; their world effects persist via the edit journal as usual.
+- **Timer/unload asymmetry.** Unloading a script does not cancel the
+  timers it created (engine-level by design); scripts must keep and
+  cancel handles themselves.
 
 ## GUI verification (headless)
 

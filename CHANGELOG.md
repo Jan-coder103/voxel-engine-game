@@ -4,6 +4,45 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.17.0] — 2026-09-18 — Phase 19 (Scripting)
+
+### Added
+
+- **Script engine** (`src/script/engine.ts`, pure): continuous rules
+  over the live world — the scenario engine's shape generalized.
+  Triggers fire on bus **events** (`on`: type + radius/box filter,
+  synchronously in emission order) or on a **condition's** rising edge
+  (`when`, evaluated per tick), gated by `if` (fire-time; false
+  swallows an event trigger's event), `cooldown`, and `maxFires`.
+  **Actions** run through the same `ScenarioIo` the scenarios use
+  (journaled edits, ignite, weather, spawns, announcements). Engine
+  level: a shared numeric **variable** store, **timers** (`after`
+  one-shot, `every` repeating, cancellable), and a capped event log
+  backing the scenario-style queries (`events/eventsNear/eventsInBox/
+lastEventTick/eventsQuiet`) plus the budgeted `countInBox`.
+  Per-tick order: due timers (creation order) → condition triggers
+  (script load then declaration order). Deterministic: no RNG, fixed
+  iteration order. Not saved (creator logic — a load does not stop
+  them).
+- **main.ts wiring**: `attach(scenarioIo)` (event triggers need a
+  stored io — bus emissions carry none); `bus.onAny → onGameEvent`;
+  `scripts.tick` just before the scenario tick in the fixed step;
+  `__mw.scripts` hook (load/unload/clear/after/every/variables).
+- **Benchmarks** (`benchmarks/script.bench.ts`): tick with a loaded
+  script ≈ 0.39 µs/tick; event fire under a 512-entry log ≈ 0.49
+  µs/event; timers-only early exit ≈ 0.05 µs/tick — `docs/
+performance.md`.
+- **Tests** (`tests/script.test.ts`, NEW — 10; **458 total**, 34
+  files): event dispatch + filters, gates (if/cooldown/maxFires),
+  rising-edge re-arm, shared variables + setup, timer semantics and
+  ordering (timers before condition triggers), reload/unload/clear,
+  event-log queries, and an end-to-end vignette over the real fire sim
+  (ignite → script wets the ground → fire snuffs).
+- **In-page probe** (`.verify/probe-p19.mjs`, zero page errors):
+  live-world scripts — fire watcher (event trigger + `if` gate +
+  counter), rising-edge reactor, one-shot and repeating timers — all
+  verified acting in the real page.
+
 ## [0.16.1] — 2026-09-18 — Phase 18 probe fixes (Session 015)
 
 ### Fixed

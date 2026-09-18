@@ -6,7 +6,7 @@ and NPCs that react to all of it. Long-term roadmap lives in
 `MICRO_WORLD_DEVELOPMENT_PLAN.md`; session-by-session state lives in
 `MICRO_WORLD_PROGRESS.md`.
 
-**Current state:** Phases 0–18 complete — an infinite streamed world of
+**Current state:** Phases 0–19 complete — an infinite streamed world of
 deterministic seeded terrain that is **editable, saveable, and
 destructible**: brush tools, box selection, clipboard, prefabs, and a
 voxel inspector (creator mode), explosions with material resistance,
@@ -86,6 +86,13 @@ down cleanly — the neighbors are watching), and a **rescue** (someone
 is boarded into a house; dig them out by hand and they walk free on
 their own).
 
+**Scripting** (programmatic, dev hook `__mw.scripts`): the same
+event/condition/action machinery generalized — load rules that watch
+bus events (with radius/box filters), poll conditions on the rising
+edge, and act through the scenario I/O (edits, ignite, weather,
+spawns, announcements), with shared variables and tick timers. The
+console/UI surface is future work.
+
 Controls: click to capture the mouse, **WASD** move, **Space** jump
 (hold against a bank underwater to climb out), **Esc** release the
 mouse; **LMB** remove, **RMB** place, **MMB** pick material, **F** paint,
@@ -163,6 +170,9 @@ src/scenario/              Scenario system (pure — no three.js)
   engine.ts                Tick-driven evaluator: objectives, triggers,
                            event log, ScenarioIo contract
   definitions.ts           Five scenarios + deterministic site resolution
+src/script/                Scripting system (pure — no three.js)
+  engine.ts                Continuous rules: event/condition triggers,
+                           actions, shared variables, tick timers
 src/npc/                   NPC simulation (pure — no three.js)
   navigation.ts            Walkable-cell queries, A* (implicit grid graph)
   npc.ts                   NpcSim: schedule, needs, fear/flee/investigate, population

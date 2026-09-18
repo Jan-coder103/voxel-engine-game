@@ -711,6 +711,37 @@ that is the believable-at-16³ version of "voxel AO / dynamic lighting":
   building (the original string-keyed comparator even sorted
   `"100,…"` before `"8,…"`, staging scenarios ~100 cells out).
 
+## Scripting (Phase 19)
+
+- **The engine** (`src/script/engine.ts`, pure) runs continuous rules
+  over the live world — the generalization of the scenario engine's
+  shape. A `ScriptDef` holds triggers; a trigger fires when a matching
+  bus _event_ arrives (`on`: type + optional radius/box filter, fired
+  synchronously inside `onGameEvent` in bus emission order) or when a
+  _condition_ (`when`) rises from false to true (evaluated per tick in
+  script-load then declaration order). Both kinds pass through the same
+  gates: `if` (fire-time gate — false swallows an event trigger's
+  event), `cooldown` (ticks between fires), `maxFires` (lifetime cap).
+  Actions are plain calls on the same `ScenarioIo` the scenarios use
+  (journaled edits, ignite, weather, spawns, announcements).
+- **Variables and timers are engine-level** (they outlive script
+  reloads; `clear()` resets everything): a shared number-valued
+  variable store, `after(ticks, run)` one-shot and `every(ticks, run)`
+  repeating timers with cancel handles. Per-tick order: due timers
+  (creation order) → condition triggers. The event log (capped 512,
+  recorded only while any script is loaded) backs the same query family
+  the scenario context has (`events/eventsNear/eventsInBox/
+lastEventTick/eventsQuiet`) plus the budgeted `countInBox`.
+- **main.ts wiring**: the engine attaches the scenario io once (event
+  triggers fire between ticks, so they need a stored io — bus emissions
+  carry none); `bus.onAny → onGameEvent`; `scripts.tick(scenarioIo)`
+  runs just before the scenario tick (a script reacting to this step's
+  events stages the world; the scenario tick, last as ever, sees the
+  result). Scripts are creator logic, not world state: a load (L) does
+  not stop them. The surface is programmatic (`__mw.scripts`:
+  load/unload/clear/after/every/variables) — the console UI is future
+  work. Deterministic: no RNG, fixed iteration order (ADR-005).
+
 ## Chunk meshing and streaming
 
 - Production meshing is `meshVolumeGreedy`: the 0fps per-axis sweep —
