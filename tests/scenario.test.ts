@@ -716,6 +716,49 @@ describe('fire scenario', () => {
     expect(rig.engine.current).toBe('failed');
     expect(rig.engine.failReason).toBe('Keep it off the neighbors');
   });
+
+  it('ignites the building body, never the flammable apron around it', () => {
+    const rig = makeRig(flatWorld());
+    const house = buildWoodHouse(rig.world, 20, 20, 6, 5);
+    // A wood apron wraps the house (as grass lawns wrap generated pads):
+    // staging must not light it — an apron fire crosses into a neighbor's
+    // box within seconds, making the scenario unwinnable by construction.
+    // (Regression: setup used to scan the outer box, whose y-courses
+    // reach the apron/lawn before the building's own body.)
+    for (let z = 18; z <= 26; z++) {
+      for (let x = 18; x <= 27; x++) {
+        const inside = x >= 20 && x <= 25 && z >= 20 && z <= 24;
+        if (!inside && rig.world.getVoxel(x, 9, z) === AIR) rig.world.setVoxel(x, 9, z, WOOD);
+      }
+    }
+    rig.engine.start(buildScenario('fire', sitesWith([house]))!, rig.io);
+    const burning = rig.fire.burningList();
+    expect(burning.length).toBeGreaterThan(0);
+    for (const c of burning) {
+      expect(c.x).toBeGreaterThanOrEqual(20); // footprint x 20..25
+      expect(c.x).toBeLessThanOrEqual(25);
+      expect(c.z).toBeGreaterThanOrEqual(20); // footprint z 20..24
+      expect(c.z).toBeLessThanOrEqual(24);
+    }
+  });
+
+  it('guards the neighbors’ bodies, not the lawn in their box margin', () => {
+    const rig = makeRig(flatWorld());
+    const house = buildWoodHouse(rig.world, 20, 20, 6, 5);
+    const neighbor = buildWoodHouse(rig.world, 34, 20, 6, 5);
+    rig.engine.start(
+      buildScenario('fire', sitesWith([house, neighbor], { spawn: { x: 20, y: 9, z: 30 } }))!,
+      rig.io,
+    );
+    // The lawn beside the neighbor catches — inside its outer box (the
+    // ±1 margin reaches lawn level) but outside its structure. Grass
+    // burns far too fast to gate on; only the neighbor's building counts.
+    for (let i = 0; i < 6; i++) {
+      rig.bus.emit({ type: 'fireIgnited', x: 33, y: 9, z: 20 });
+    }
+    rig.engine.tick(rig.io);
+    expect(rig.engine.current).toBe('running');
+  });
 });
 
 describe('collapse scenario', () => {
@@ -865,6 +908,39 @@ describe('scenario sites', () => {
     expect(scenarioTarget('rescue', sites)?.spec.type).toBe('house');
     expect(scenarioTarget('demolition', sites)).toBeDefined();
     expect(scenarioTarget('collapse', sites)).toBeDefined();
+  });
+
+  it('honors the rotation contract: the staged target is the rotated buildings[0]', () => {
+    const sites = resolveSites(params);
+    const total = sites.buildings.length;
+    for (let i = 0; i < Math.min(total, 8); i++) {
+      const rotated: ScenarioSites = {
+        ...sites,
+        buildings: [...sites.buildings.slice(i), ...sites.buildings.slice(0, i)],
+      };
+      expect(scenarioTarget('collapse', rotated)).toBe(rotated.buildings[0]);
+      expect(scenarioTarget('demolition', rotated)).toBe(rotated.buildings[0]);
+      // house-preferring ids take the first house in rotated order
+      const firstHouse = rotated.buildings.find((b) => b.spec.type === 'house');
+      expect(scenarioTarget('fire', rotated)).toBe(firstHouse);
+      expect(scenarioTarget('rescue', rotated)).toBe(firstHouse);
+    }
+  });
+
+  it('stages on array order, never a re-derived proximity scan', () => {
+    // Regression: target selection used to compare stringified
+    // "distance,x,z" keys, so a house ~100 cells out ("100,…" sorts before
+    // "8,…") staged the scenario outside the NPCs' despawn radius while
+    // HUD/probe code read the near house. Selection is positional now.
+    const sites = resolveSites(params);
+    const near = sites.buildings[0];
+    const far = sites.buildings[sites.buildings.length - 1];
+    expect(far).not.toBe(near);
+    const farFirst: ScenarioSites = { ...sites, buildings: [far, near] };
+    expect(scenarioTarget('collapse', farFirst)).toBe(far);
+    expect(scenarioTarget('demolition', farFirst)).toBe(far);
+    const nearFirst: ScenarioSites = { ...sites, buildings: [near, far] };
+    expect(scenarioTarget('collapse', nearFirst)).toBe(near);
   });
 
   it('enumerateBuildings yields a mixed town', () => {

@@ -138,36 +138,24 @@ export function enumerateBuildings(params: TerrainParams): BuildingSpec[] {
   return out;
 }
 
-/** Nearest building site to a point (Manhattan on doors; ties by x, z). */
-function pickNearest(
-  buildings: readonly BuildingSite[],
-  point: { x: number; z: number },
-  type?: BuildingSpec['type'],
-): BuildingSite | undefined {
-  let best: BuildingSite | undefined;
-  let bestKey = '';
-  for (const site of buildings) {
-    if (type !== undefined && site.spec.type !== type) continue;
-    const d = Math.abs(site.spec.door.x - point.x) + Math.abs(site.spec.door.z - point.z);
-    const key = `${d},${site.spec.door.x},${site.spec.door.z}`;
-    if (best === undefined || key < bestKey) {
-      best = site;
-      bestKey = key;
-    }
-  }
-  return best;
-}
-
 /**
  * The scenario's building: fire/rescue want houses (furniture, bedrooms,
- * interiors), the rest take whatever stands nearest the spawn.
+ * interiors), the rest take whatever stands nearest the spawn. The FIRST
+ * suitable entry in array order wins — `sites.buildings` is sorted
+ * nearest-first, and main's startScenario rotates the array per candidate,
+ * so this honors the rotation contract: after a rotation, the staged
+ * target is always `activeSites().buildings[0]`. (Never re-derive
+ * "nearest" here: a fresh proximity scan would ignore the rotation and
+ * stage every attempt on the same global-nearest building.)
  */
 export function scenarioTarget(id: ScenarioId, sites: ScenarioSites): BuildingSite | undefined {
   const prefer: BuildingSpec['type'] | undefined =
     id === 'fire' || id === 'rescue' ? 'house' : undefined;
-  return (
-    pickNearest(sites.buildings, sites.spawn, prefer) ?? pickNearest(sites.buildings, sites.spawn)
-  );
+  if (prefer !== undefined) {
+    const house = sites.buildings.find((site) => site.spec.type === prefer);
+    if (house) return house;
+  }
+  return sites.buildings[0];
 }
 
 /** A burst cell on the main: dry lane, clear of pump, riser, and cable crossings. */
@@ -322,7 +310,10 @@ export function scenarioReady(id: ScenarioId, world: World, sites: ScenarioSites
       );
     case 'fire': {
       const site = scenarioTarget('fire', sites);
-      return site !== undefined && findFlammable(world, site.box) !== undefined;
+      // Validate the building body (footprint, floor up) — the same box
+      // setup ignites from. The outer box would find the grass apron and
+      // stage a lawn fire that leaps to the neighbors within seconds.
+      return site !== undefined && findFlammable(world, buildingBody(site.spec)) !== undefined;
     }
     case 'collapse':
     case 'demolition': {
@@ -411,6 +402,11 @@ function fireScenario(sites: ScenarioSites): ScenarioDef | undefined {
       other !== site &&
       Math.abs(other.spec.door.x - center.x) + Math.abs(other.spec.door.z - center.z) <= 30,
   );
+  // The guard watches the neighbors' structures (body boxes), not their
+  // outer boxes: a box reaches lawn level, and a burning lawn crosses the
+  // ~1-cell-per-tick grass in under a second — unwinnable. Scorched lawns
+  // are survivable; a neighbor's walls catching is not.
+  const neighborBodies = neighbors.map((nb) => buildingBody(nb.spec));
   return {
     id: 'fire',
     title: SCENARIO_TITLES.fire,
@@ -419,7 +415,10 @@ function fireScenario(sites: ScenarioSites): ScenarioDef | undefined {
     setup(io) {
       io.forceWeather('clear');
       io.ensureAround(center.x, center.z, 3);
-      const cell = findFlammable(io.world, box);
+      // Ignite inside the building body (footprint, floor up — "a stove
+      // fire"), never the apron: the outer box reaches the grass lawn, and
+      // a lawn fire crosses to a neighbor's box in ~10 ticks — unwinnable.
+      const cell = findFlammable(io.world, body);
       if (cell) io.ignite(cell.x, cell.y, cell.z);
       io.setCounter('air0', countMaterial(io.world, body, AIR));
       io.setCounter('solid0', solidCourseTotal(io.world, body));
@@ -441,7 +440,7 @@ function fireScenario(sites: ScenarioSites): ScenarioDef | undefined {
       {
         id: 'neighbors',
         description: 'Keep it off the neighbors',
-        failed: (ctx) => neighbors.some((nb) => ctx.eventsInBox('fireIgnited', nb.box) > 2),
+        failed: (ctx) => neighborBodies.some((nb) => ctx.eventsInBox('fireIgnited', nb) > 2),
       },
     ],
   };
@@ -531,6 +530,7 @@ function demolitionScenario(sites: ScenarioSites): ScenarioDef | undefined {
       other !== site &&
       Math.abs(other.spec.door.x - center.x) + Math.abs(other.spec.door.z - center.z) <= 34,
   );
+  const neighborBodies = neighbors.map((nb) => buildingBody(nb.spec));
   return {
     id: 'demolition',
     title: SCENARIO_TITLES.demolition,
@@ -554,11 +554,14 @@ function demolitionScenario(sites: ScenarioSites): ScenarioDef | undefined {
       {
         id: 'clean',
         description: 'Keep the neighbors standing',
+        // Blasts anywhere in a neighbor's box are collateral; fires count
+        // only when the neighbor's own structure catches (body box — lawns
+        // burn too fast to gate on).
         failed: (ctx) =>
           neighbors.some(
-            (nb) =>
+            (nb, i) =>
               ctx.eventsInBox('explosion', nb.box) > 0 ||
-              ctx.eventsInBox('fireIgnited', nb.box) > 2,
+              ctx.eventsInBox('fireIgnited', neighborBodies[i]) > 2,
           ),
       },
       {

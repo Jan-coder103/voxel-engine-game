@@ -33,6 +33,7 @@ import {
   resolveSites,
   scenarioReady,
   scenarioTarget,
+  type BuildingSite,
   type ScenarioId,
   type ScenarioSites,
 } from './scenario/definitions';
@@ -502,9 +503,11 @@ function main(): void {
   };
   bus.onAny((event) => scenario.onGameEvent(event));
 
-  // The sites a running scenario was staged from (its target is
-  // activeSites.buildings[0]) — exposed for HUD-adjacent debugging.
+  // The sites a running scenario was staged from, plus the staged target
+  // itself (fire/rescue prefer houses, so the target is not necessarily
+  // buildings[0]) — exposed for HUD-adjacent debugging.
   let activeScenarioSites: ScenarioSites | undefined;
+  let activeScenarioTarget: BuildingSite | undefined;
 
   /**
    * Validate the stage, then start. Buildings are tried nearest-first:
@@ -529,6 +532,7 @@ function main(): void {
       const def = buildScenario(id, rotated);
       if (!def) continue;
       activeScenarioSites = rotated;
+      activeScenarioTarget = target;
       scenario.start(def, scenarioIo);
       return true;
     }
@@ -1150,6 +1154,7 @@ function main(): void {
         engine: scenario,
         sites: scenarioSites,
         activeSites: () => activeScenarioSites,
+        target: () => activeScenarioTarget,
         ids: SCENARIO_IDS,
         start: (id: ScenarioId) => startScenario(id),
         stop: () => scenario.stop(),

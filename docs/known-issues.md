@@ -375,22 +375,31 @@ milestone goes here before it goes to the backlog.
 
 ## Scenarios (Phase 18)
 
-- **In-page probe findings (open, Session 014).** The first
-  `.verify/probe-p18.mjs` run verified flood and collapse end to end in
-  the live page (start → play → complete, zero page errors), but three
-  items need diagnosis before the harness section can be trusted:
-  (1) **Rescue failed "the figure survives"** — the spawned victim
-  vanished during the run (population maintenance only despawns past
-  80 cells, so something else removed it; needs an instrumented probe
-  dumping victim id/counter/npc distances/`npcDied` events per few
-  seconds). (2) **Fire failed "keep it off the neighbors"** — grass
-  lawns carry fire between houses quickly, so the neighbor guard fires
-  if the dousing is not immediate; likely correct-but-hard tuning, and
-  the unattended neighbor fires then burned on through the collapse
-  window. (3) **Demolition found no ready building afterwards** — after
-  ~50 s of unattended neighbor fire, every rotated candidate failed
-  readiness; needs a re-probe with fire containment (rain or dousing)
-  before blaming the rotation loop.
+- **Session 014 probe findings — all three resolved (Session 015).**
+  (1) **Rescue failed "the figure survives"**: root cause was target
+  selection, not the victim — `pickNearest` compared stringified
+  `"distance,x,z"` keys, so `"100,…"` sorted before `"8,…"` and the
+  scenario staged on a house ~100 cells from spawn, *outside* the
+  NPCs' 80-cell despawn radius; `maintain()` silently distance-despawned
+  the victim on tick 1 (insta-fail at `t=1`, no `npcDied` event).
+  Selection is positional now (`scenarioTarget` = first suitable entry
+  in array order, which also makes the rotation contract real). (2)
+  **Fire failed "keep it off the neighbors"**: staging, not difficulty —
+  `findFlammable` scanned the outer box, whose y-courses reach the grass
+  apron, so the "house fire" ignited the *lawn* (≈1 cell/tick across
+  open grass; neighbor-box hits within ~10 ticks — unwinnable by
+  construction). Setup now ignites the building body (footprint, floor
+  up), and the neighbor guard watches neighbor *bodies* rather than
+  boxes that reach lawn level: verified winnable with a 4 s human-ish
+  reaction delay. (3) **Demolition found no ready candidate**: a
+  casualty of the same two bugs (wrong target, uncontained lawn fire) —
+  with containment it starts and completes. All five scenarios verified
+  end to end live, zero page errors.
+- **Lawn fire spread is real and fast.** Grass carries fire at roughly
+  a cell per tick; the fire/demolition guards now tolerate scorched
+  lawns (they gate on neighbor *structures* only), but an unattended
+  blaze still cascades block-wide eventually (the plan §57 fire-ecology
+  chain, arriving early). Slowing grass is a Phase 10 tuning question.
 - **Scenario tuning is SwiftShader-relative.** Deadlines and hint
   ticks are calibrated against this VM's ~0.5× sim rate; they will
   need re-tuning on real hardware.
@@ -398,10 +407,6 @@ milestone goes here before it goes to the backlog.
   geometry only see loaded chunks; main force-loads the stage at
   start, but a player who runs far away can blind a guard until the
   chunks stream back.
-- **Fire spreads through the town's grass.** The fire scenario's
-  neighbor guard assumes houses are separated by non-fuel; lawns and
-  street trees are fuel, so an unattended blaze cascades block-wide
-  (the plan §57 fire-ecology chain, arriving early).
 - **Guards are event-driven, not physical.** "Neighbors standing",
   "nobody hurt" and "keep water off the plant" trust `GameEvent`
   emissions and box censuses rather than tracking every cell; a player

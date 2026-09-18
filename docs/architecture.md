@@ -678,27 +678,38 @@ that is the believable-at-16³ version of "voxel AO / dynamic lighting":
   - **Flood** — the generated main bursts (Phase 15 leak pouring Phase 9
     water); stop the leak (cut the pipe or take out the pump) before the
     deadline; guard: no water in the generator vault box.
-  - **Fire** — the nearest house ignites low (a `findFlammable` scan
-    that skips water-adjacent and fully-sealed cells — the fire sim
-    would smother those instantly); douse it (placed water) before half
-    the structure is consumed; guards: neighbors unburned.
+  - **Fire** — the nearest house ignites inside (a `findFlammable` scan
+    over the building **body** — footprint, floor up — that skips
+    water-adjacent and fully-sealed cells; the outer box would reach the
+    grass apron and stage an unwinnable lawn fire); douse it (placed
+    water) before half the structure is consumed; guard: no ignitions in
+    the neighbors' **bodies** (their structures — lawn fires in the box
+    margin are tolerated, grass burns far too fast to gate on).
   - **Collapse** — the ground-floor wall courses are carved out; the
     Phase 11 support graph stages the real cascade; get clear, wait for
     the quiet window, keep the witness (a real spawned figure) alive.
   - **Demolition** — player-driven: level the nearest building
-    (collapse at the site or ¾ removed) with no blasts/fires in
-    neighbor boxes and no casualties.
+    (collapse at the site or ¾ removed) with no blasts in neighbor
+    boxes, no fires in neighbor bodies, and no casualties.
   - **Rescue** — a figure is spawned inside and the doorway boarded;
     dig it out by hand; the figure walks free on its own schedule
     (work/wander), and survives.
 - **main.ts wiring**: `J` cycles the registry; `__mw.scenario` exposes
-  engine/sites/ids/start/stop/notes. `startScenario` tries candidate
-  buildings **nearest-first and skips stages that cannot host the
-  scenario anymore** (a burned or soaked house) by re-validating
-  readiness per candidate — scenarios chain through the town instead of
-  re-targeting rubble. The scenario tick runs last in the fixed step
-  (it sees this step's fires, floods, collapses, and NPC moves); a
-  load (L) stops the run.
+  engine/sites/ids/start/stop/notes plus `target()` (the staged site —
+  fire/rescue prefer houses, so it is not necessarily
+  `buildings[0]`). `startScenario` tries candidate buildings
+  **nearest-first and skips stages that cannot host the scenario
+  anymore** (a burned or soaked house) by re-validating readiness per
+  candidate — scenarios chain through the town instead of re-targeting
+  rubble. The scenario tick runs last in the fixed step (it sees this
+  step's fires, floods, collapses, and NPC moves); a load (L) stops the
+  run.
+- **Target selection is positional** (Session 015): `scenarioTarget`
+  returns the first suitable entry of the (rotated, nearest-first
+  sorted) buildings array — never a re-derived proximity scan, which
+  would ignore the rotation and always restage the same global-nearest
+  building (the original string-keyed comparator even sorted
+  `"100,…"` before `"8,…"`, staging scenarios ~100 cells out).
 
 ## Chunk meshing and streaming
 

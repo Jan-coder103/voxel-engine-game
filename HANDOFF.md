@@ -1,16 +1,13 @@
-# HANDOFF — Session 014 wrap (2026-09-13, evening)
+# HANDOFF — Session 015 wrap (2026-09-18)
 
-**Status: Phase 18 (Scenario System) is implemented, unit-tested, wired,
-benchmarked, documented, and committed as `[0.16.0]`.** 444 unit tests /
-33 files green, typecheck/lint/prettier/build clean, scenario
-micro-benchmarks recorded (≈0.11 µs/tick), docs updated. An in-page
-probe ran **once**: **flood and collapse are verified end to end in the
-live page** (start → play → complete, zero page errors, screenshots in
-`.verify/artifacts/p18-*.png`). **Three open items** came out of that
-run — rescue, fire-tuning, demolition-readiness — they are probe-side
-diagnostics, not unit failures, and they are the first task for
-Session 015. The Phase 18 harness section is deliberately **not written
-yet** (encode it after the three items are resolved).
+**Status: Phase 18 (Scenario System) is now live-verified END TO END.**
+The three open probe items from Session 014 were root-caused (all three
+were real Phase 18 bugs, not probe flukes or tuning), fixed, unit-tested
+(+4 → **448** / 33 files), and verified in-page: **all five scenarios
+start, play, and complete on seed 24680 with zero page errors**
+(`probe-p18-chain2.mjs` + a human-timing fire check). The Phase 18
+harness section is **written** (8 checks, two pages) but its first run is
+deferred per the VM-load policy. Committed as `[0.16.1]`.
 
 **⚠ First command of every shell: `export PATH="$HOME/.local/bin:$PATH"`
 (npm/node live in `~/.local/opt`, linked from `~/.local/bin`).**
@@ -21,170 +18,139 @@ yet** (encode it after the three items are resolved).
 
 **⚠ Before any probe/harness/bench run: check `uptime` AND
 `ps aux --sort=-%cpu` for stale node/vite processes. During a run:
-touch nothing (absolute rule).** (Session 014 left NO dev server
-running — it was killed at wrap-up. Probe used `.verify/probe-p18.mjs`
-against `npm run dev` on :5173.)
+touch nothing (absolute rule).** (Session 015 left a dev server RUNNING
+in the background: `npm run dev`, log `/tmp/mw-dev.log`, PID in the
+session — kill it before harness/bench work, or reuse it for probes.)
 
 ## Pending heavy work (skip-for-now list — do these when idle)
 
-1. **Session 015 diagnostics (in-page probes, ~15–30 min each)** — the
-   three open Phase 18 items; see "First tasks tomorrow" below.
-2. **Phase 18 harness section** — write AFTER the diagnostics land
-   (expected shape: on `?seed=24680`, for each scenario: `__mw.scenario.start(id)`
-   → assert HUD `SCEN` line → perform the resolution page-side
-   (setVoxel water/dig/pump-removal/carve) → poll `engine.current` →
-   complete; ~6–8 checks). Then it joins the deferred-run list.
-3. **Phase 16 harness confirmation** — `.verify/run.mjs` full run ×2
-   consecutive: Phase 16 section must be 8/8, Phase 15 still 8/8, zero
-   page errors (carried since Session 012).
-4. **Phase 17 harness first run** — the 5-check Phase 17 section has
+1. **Phase 18 harness first run** — `.verify/run.mjs` full run; the new
+   Phase 18 section (8 checks, two pages on `?seed=24680`) has never
+   executed; the probes verified each piece but not the section itself.
+2. **Phase 16 harness confirmation** — full run ×2 consecutive: Phase 16
+   section 8/8, Phase 15 still 8/8, zero page errors (carried since
+   Session 012).
+3. **Phase 17 harness first run** — the 5-check Phase 17 section has
    never run (carried since Session 013).
-5. **Benchmark re-runs on an idle machine** — atmosphere, light, and
-   utilities numbers carry loaded-VM caveats (scenario bench numbers
-   from this session are also load-~2 but tiny).
-6. Manual GUI pass (user) — pending since Phase 7.
+4. **Benchmark re-runs on an idle machine** — atmosphere, light,
+   utilities numbers carry loaded-VM caveats (scenario bench ≈0.11
+   µs/tick is also load-~2 but tiny; no new bench files this session).
+5. Manual GUI pass (user) — pending since Phase 7.
 
-## What landed this session (Phase 18 — plan §118)
+## What landed this session
 
-1. **`src/scenario/engine.ts`** (NEW, pure): tick-driven evaluator.
-   `ScenarioDef` = setup + objectives + one-shot triggers + optional
-   scenario-level `failed`/`timeLimit`. Objectives: `done`/`failed`
-   conditions, `deadline` (ticks only while unlocked), `after` unlock
-   gate. Fixed per-tick order: triggers → scenario fail → objectives.
-   Completion needs ≥1 positive objective AND all done; guard-only
-   objectives (failed-without-done) never block and flip to done at the
-   end. `ScenarioContext` = ticks + bus-event log queries (events,
-   eventsNear, eventsInBox, lastEventTick, eventsQuiet; log capped 512,
-   recorded only while running) + scratch counters + box material
-   census (≤50k cells) + npcById. All world access via injected
-   `ScenarioIo` (journaled `edit`, `ignite`, `forceWeather`,
-   `ensureAround` chunk force-load, `spawnAt` → npc id, `setCounter`,
-   `announce`, sensors: leakCount/litCount/burningCount). Statuses
-   idle/running/complete/failed; `active` = running only; `title`
-   getter for the HUD's final line. Transient state — save format
-   untouched.
-2. **`src/scenario/definitions.ts`** (NEW, pure): `resolveSites(terrain)`
-   — all viable town buildings via `planAt`/`lotSpec` (nearest-first
-   from spawn), water main (pump/tap/burst from `pipelineRoute`; burst
-   = dry non-cable-crossing lane cell, y=h−2), generator block.
-   `scenarioReady` validates on the loaded world; `scenarioTarget`
-   prefers houses for fire/rescue. Five scenarios: flood (burst →
-   stop-the-leak + water-off-the-plant guard + hint), fire
-   (`findFlammable` skips water-adjacent AND fully-sealed cells;
-   douse-before-half-consumed via `buildingBody` baselines;
-   neighbor-box ignition guards), collapse (carve ground courses →
-   Phase 11 cascade; get-clear deadline; after-gated quiet-window;
-   witness-survives guard), demolition (collapse-at-site or ¾ removed;
-   neighbor-box explosion/fire guards; casualty guard), rescue (figure
-   spawned inside, doorway boarded with brick; distance-from-door done;
-   survives guard; dig hint).
-3. **`src/sim/events.ts`**: `EventBus.onAny` (runs before typed
-   handlers; listenerCount includes them). Additive; all old tests pass.
-4. **`src/main.ts` wiring**: `resolveSites` at boot; `ScenarioEngine` +
-   `ScenarioIo` over the live game (io.edit = the player's undoable
-   edit path); `bus.onAny → engine.onGameEvent`; **`startScenario(id)`**
-   tries candidate buildings nearest-first and **rotates past stages
-   that can no longer host the scenario** (readiness re-check per
-   candidate); **J** cycles the registry; scenario tick LAST in the
-   fixed step; HUD `SCEN … [x]/[!]/[ ]/[?] … J next` + announcement
-   line (600-tick freshness); `L` load stops the run;
-   `__mw.scenario` = { engine, sites, activeSites(), ids, start, stop,
-   notes }.
-5. **Tests** (`tests/scenario.test.ts`, NEW — 24 → **444 total**, 33
-   files): engine semantics + all five scenarios end to end on fixture
-   rigs wired like the game (bus ↔ engine, real collapse edits, sims in
-   main's order; lake/flat worlds, wood house + two-story fixtures,
-   pressurized water main) + real-generator site resolution on seed
-   24680 (determinism, ordering, readiness, all-five-buildable).
-6. **Benchmarks** (`benchmarks/scenario.bench.ts`, NEW): ≈0.11 µs/tick
-   idle and under a 512-event log — `docs/performance.md`.
-7. **Docs**: architecture "Scenario system (Phase 18)", known-issues
-   "Scenarios (Phase 18)" (7 entries incl. the open probe findings),
-   performance scenario baselines, README (state 0–18, quickstart
-   scenarios paragraph + J, layout), CHANGELOG `[0.16.0]`,
-   MICRO_WORLD_PROGRESS (Session 014 + status + checklist), HANDOFF
-   (this file).
+1. **Root cause 1 — scenario target selection** (`src/scenario/
+   definitions.ts`): `pickNearest` compared stringified
+   `"distance,x,z"` keys, so `"100,-75,-30"` sorted before `"8,-3,5"`.
+   Fire/rescue staged on a house ~100 cells from spawn — **outside the
+   NPCs' 80-cell despawn radius** — where `maintain()` silently
+   distance-despawned the rescue victim on tick 1 (the "vanished
+   figure", insta-fail at `t=1`, no `npcDied`), while HUD/probe code
+   read `buildings[0]` (a different building) — which also explains the
+   boards "not landing" and session 014's douse-the-wrong-house.
+   `scenarioTarget` is **positional** now (first suitable entry of the
+   rotated, nearest-first array; houses preferred for fire/rescue). This
+   also fixes a latent design flaw: with a correct comparator, a
+   proximity re-scan would ignore the rotation and restage the same
+   global-nearest building for every candidate — the rotation contract
+   ("`activeSites().buildings[0]` is the staged target") is real now.
+2. **Root cause 2 — fire staged on the lawn**: `findFlammable` scanned
+   the outer box, whose y-courses reach the grass apron below/around the
+   walls, so the "house fire" ignited GRASS — spreading ≈1 cell/tick,
+   neighbor-box hits within ~10 ticks (unwinnable by construction; the
+   unattended blaze then burned the town block, which is why demolition
+   later found "no ready candidate"). Setup and `scenarioReady('fire')`
+   now scan the **building body** (footprint, floor up).
+3. **Root cause 3 — neighbor guards gated on lawn-level boxes**: fire
+   and demolition now count `fireIgnited` inside neighbor **bodies**
+   (structures). The old boxes reach lawn level; a scorched-lawn
+   crossing tripped them in under a second. Verified winnable with a
+   4 s human-ish reaction delay (douse at t≈55, 82 cells burning →
+   complete, neighbors held). Explosions still guard on full boxes.
+4. **`__mw.scenario.target()`** (main.ts): the staged site — fire/rescue
+   prefer houses, so it is NOT necessarily `buildings[0]`. Probes and
+   HUD-adjacent code must use this.
+5. **Tests** (+4 → 28 in `tests/scenario.test.ts`, **448 total**, 33
+   files): rotation contract over resolved sites; positional selection
+   (far-first array wins); body-only fire ignition (wood-apron
+   fixture); lawn-tolerant neighbor guard.
+6. **In-page verification** (`.verify/probe-p18-chain2.mjs` +
+   `probe-p18-fire-human.mjs`, zero page errors): rescue complete
+   (boards BRICK at the house door → dig 2 → figure walks free, no
+   deaths), fire complete (interior blaze, doused, zero neighbor hits),
+   collapse complete (carve → cascade → quiet window → witness safe),
+   demolition complete (raze by hand); flood re-verified from session
+   014. Screenshots `p18-*-fixed.png` in `.verify/artifacts/`.
+7. **Phase 18 harness section** (`.verify/run.mjs`): hook/sites census;
+   rescue stage+HUD+complete; flood burst→pump; fire douse (fresh page);
+   collapse clear+quiet; demolition raze. Written + `node --check`ed;
+   **never run** — join the deferred list above.
+8. **Docs**: known-issues "Scenarios (Phase 18)" rewritten (findings
+   closed, lawn-rate note → Phase 10 tuning question), architecture
+   scenario section (positional targeting, body staging/guards,
+   `target()`), CHANGELOG `[0.16.1]`, MICRO_WORLD_PROGRESS (Session 015
+   + status), HANDOFF (this file).
 
-## First tasks tomorrow (Session 015) — the three open probe items
+## First tasks tomorrow (Session 016)
 
-All three were found by `.verify/probe-p18.mjs` (run once; kept in
-`.verify/` for reuse). Unit tests are green throughout — these are
-live-world behaviors.
+**Phase 19 — Scripting (plan §119)**: events, triggers, conditions,
+actions, variables, timers. The scenario engine (Phase 18) was
+deliberately shaped like this layer — recommended slice:
 
-1. **Rescue failed `The figure survives`** (victim vanished mid-run).
-   Facts: start ✓, HUD `SCEN` line ✓, victim spawn count read 16,
-   probe dug 11 BRICK cells around the door ✓, then within ~30 s the
-   `alive` guard fired (`npcById(counter('victim')) === undefined`).
-   Population `maintain()` only despawns past 80 cells (checked), and
-   house A sits near spawn — so the figure was removed another way OR
-   the spawn/counter path misfired. **Instrument**: after start, every
-   ~2 s dump `activeSites().buildings[0].spec.door`,
-   `__mw.scenario.engine` objective views, the victim's id via the
-   counter (engine.counters are private — read via a probe trigger or
-   track `__mw.npc.list()` ids vs. the post-start delta), each figure's
-   distance from the door, and any `npcDied` bus emissions. Suspects:
-   (a) npcDied via water sweep after the figure exited and wandered;
-   (b) the dig (11 cells!) triggered a structural collapse that
-   dropped/removed the interior stand → figure fell → ??? (NPC fall
-   lands or sweeps); (c) `spawnAt` failed silently (counter 0 →
-   insta-fail — would show immediately, which the timeline allows).
-2. **Fire failed `Keep it off the neighbors`** — grass lawns carry fire
-   between houses fast; the probe doused late (after a 2.5 s screenshot
-   wait) and only the target's body. Likely correct-but-hard. Retune the
-   probe: douse immediately, or `forceWeather('rain')` after ignition to
-   contain, or widen the douse to the block. Decide whether lawn-spread
-   difficulty is wanted (plan §57 likes it; the HUD hint could warn).
-3. **Demolition found no ready candidate** (`start('demolition')` →
-   false) after ~50 s of unattended neighbor fire during the collapse
-   window — plausibly the town block genuinely burned (rotation checked
-   all 143). Re-probe with fire containment (rain) right after the fire
-   scenario; if it still fails, dump per-candidate
-   `scenarioReady`-equivalent info via a small in-page loop (the
-   rotation lives in main's `startScenario`).
+1. **Pure scripting core** (`src/script/`, ADR-002): `ScriptDef` =
+   event subscriptions (bus types + position/box filters) → conditions
+   (reuse the `ScenarioContext` query shape: counters, censuses, event
+   queries) → actions (a subset of `ScenarioIo`: edits, ignite, weather,
+   spawn, announce) + named variables + timers (tick-delayed one-shot or
+   repeating). Same engine discipline as scenarios: pure, deterministic,
+   bus-fed, injected I/O, budgeted censuses.
+2. **Console/surface** (main.ts + DEV hook): a minimal `__mw.scripts`
+   API and (cheap) a creator-mode text console later; do NOT build the
+   plan §65 node UI.
+3. **Tests**: timer semantics, one-shot vs repeating triggers, variable
+   scoping, action budgeting, a couple of end-to-end vignettes on
+   fixture rigs (e.g. "on fireStarted near the warehouse → announce +
+   spawn figure").
+4. Cheap Phase 17 consumers can ride along if time remains: NPC night
+   sight sampling local light (`lightLevel` option exists), inspector
+   sky/block readout, day/night lamp switching in the power sim.
 
-Then: write the Phase 18 harness section (shape listed in "Pending
-heavy work"), add it to the deferred-run list, and proceed to Phase 17
-leftovers (NPC night sight sampling local light via the existing
-`lightLevel` option, inspector sky/block readout, day/night lamp
-switching in the power sim) or Phase 19 — Scripting (plan §119; the
-scenario engine's condition/trigger/action shape was deliberately
-aligned with it).
+## Session 015 lessons (new ones only)
 
-## Session 014 lessons (new ones only)
-
-- **Fixture structural honesty**: a test main floating over the lake
-  basin was correctly toppled by the Phase 11 support graph once the
-  burst hole appeared — pruning the leak and insta-completing the flood
-  scenario. The sims were right; the fixture was a building code
-  violation. Bisect with throwaway probes instead of trusting either
-  side (`probe-flood.ts` → found in two runs).
-- **Instant-win hazards in staged content**: any setup that the live
-  sims can immediately undo (a fire staged in a sealed pocket is
-  smothered on tick 1; baselines inflated by terrain make
-  "half-consumed" unreachable; a guard-only objective set completes
-  vacuously) needs a validation pass that models the sim's rules
-  (`findFlammable` sealed/wet checks; `buildingBody` baselines;
-  ≥1-positive-objective completion rule).
-- **A failing engine tick order shows up as weird objective outcomes**
-  (deadlines expiring while locked, guards completing scenarios) —
-  pin evaluation-order semantics in unit tests before debugging
-  conditions themselves.
-- Probe logistics: `browser.newPage()` per probe stage gives a fresh
-  localStorage each time (no save carryover between probe pages);
-  screenshots need the pointer-lock click first (the overlay scrim
-  eats bright scenes — Session 013 lesson, re-confirmed).
+- **A string-keyed "tuple" comparator is a real bug class**: `${d},${x},
+  ${z}` sorts lexicographically — `"100,…"` < `"8,…"`. Any
+  nearest-first code building sort keys must compare numerically
+  (tuple-by-tuple), not as strings. The probes had "verified" around
+  this for a full session because flood/collapse completed anyway.
+- **Insta-fails masquerade as mid-run failures**: the session-014 probe
+  never polled `engine.current` before its dig, so a t=1 failure read
+  as "vanished mid-run". Poll status immediately after any staged
+  start; instrument with same-turn reads (start + state dump in ONE
+  `evaluate`) before round-trip sampling.
+- **Silent removals need patched sims**: `maintain()`'s distance despawn
+  emits no event; when an NPC vanishes without `npcDied`, monkey-patch
+  `maintain`/`tick` (prototype-level, runtime) to log removals and
+  centers.
+- **Scenario boxes reach the terrain**: a building's outer box includes
+  lawn-level courses; guards on "the building" must use the body box
+  (footprint, floor up). Grass burns at ≈1 cell/tick — any fire guard
+  measured in ticks that a lawn can trip is unwinnable.
+- **`activeSites().buildings[0]` was never the contract** — the staged
+  target is `scenarioTarget`'s pick; use `__mw.scenario.target()`.
 
 ## How to pick up (next session)
 
 1. `export PATH="$HOME/.local/bin:$PATH"`; check `uptime` +
-   top-CPU stragglers; `npm run dev` in background (log to /tmp);
-   `cd .verify && node probe-p18.mjs` (or a new instrumented probe) —
-   work the three items above.
-2. Keep the VM-load policy: no full harness runs; probes and the one
-   micro-bench file are the approved load class.
-3. After the diagnostics: retune/fix, re-run the probe clean, write
-   the harness section, update PROGRESS/known-issues, commit.
-4. Then Phase 17 cheap consumers or Phase 19 — Scripting.
+   top-CPU stragglers; kill or reuse the session-015 dev server
+   (`/tmp/mw-dev.log`, :5173).
+2. Start Phase 19 per the slice above (pure `src/script/` core first,
+   tests, then main wiring; no node-UI).
+3. Keep the VM-load policy: no full harness runs; probes and single
+   micro-bench files are the approved load class. The harness Phase 18
+   section + Phase 16/17 runs stay on the deferred list.
+4. If a harness window opens instead: run `.verify/run.mjs` on an idle
+   box (Phase 18 first run + Phase 16 ×2 + Phase 17 first run), then
+   update the harness notes in PROGRESS.
 
 ## Key design facts (for working on the scenario system)
 
@@ -197,10 +163,15 @@ aligned with it).
   `failed` → `timeLimit` → objectives in declaration order (done wins
   ties against failed within the same objective; a later objective's
   failure overrides an earlier one's completion in the same tick).
-- **Rotation**: main's `startScenario` rotates the sorted buildings
-  array per candidate; each scenario definition closes over its
-  rotated `sites`, so `sites.buildings[0]` is always the staged target
-  (`__mw.scenario.activeSites().buildings[0]` from probes).
+- **Rotation contract**: `startScenario` rotates the nearest-first
+  sorted buildings array per candidate; `scenarioTarget` picks
+  positionally (first suitable entry), so the staged target is always
+  `activeSites().buildings[0]` — except house-preferring ids, where it
+  is the first house; read `__mw.scenario.target()` when in doubt.
+- **Body vs box**: `buildingBody(spec)` = footprint, floor up (no pad,
+  no apron) — destruction baselines AND fire staging AND neighbor fire
+  guards use bodies; full boxes are for explosions/water/collapse
+  geometry.
 - **Event log**: recorded only while running, capped 512 (shift on
   overflow), cleared on start. `eventsQuiet(type, x, y, z, r, span)` =
   no matching event within `span` ticks (last match ≤ ticks − span).
@@ -208,6 +179,9 @@ aligned with it).
   loops fixed-order; same tick sequence ⇒ same run.
 - Scenario state is transient like fire/NPC state — `L` (load) stops
   the run; staged damage persists via the edit journal as normal.
+- NPC facts that matter here: `DESPAWN_RADIUS` = 80 (silent, no event);
+  deaths are only `explosion`/`drowned` (both emit `npcDied`);
+  population fills ≤1 spawn/tick toward 16.
 
 ## Agreed approach (unchanged)
 

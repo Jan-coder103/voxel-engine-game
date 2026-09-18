@@ -4,6 +4,51 @@ All notable changes to MICRO//WORLD are documented here.
 Format loosely follows Keep a Changelog; versioning is informal until
 the first external release.
 
+## [0.16.1] — 2026-09-18 — Phase 18 probe fixes (Session 015)
+
+### Fixed
+
+- **Scenario target selection (root cause of the Session 014 probe
+  failures).** `pickNearest` compared stringified `"distance,x,z"`
+  keys, so `"100,…"` sorted before `"8,…"`: fire/rescue staged on a
+  house ~100 cells from spawn — outside the NPCs' 80-cell despawn
+  radius — where `maintain()` silently despawned the rescue victim on
+  tick 1 ("The figure survives" insta-fail) while HUD/probe code read a
+  different building. `scenarioTarget` is positional now (first
+  suitable entry of the rotated, nearest-first array), which also makes
+  the startScenario rotation contract real: with the old semantics a
+  correct comparator would have restaged every rotation on the same
+  global-nearest building.
+- **Fire staging ignited the lawn, not the house.** `findFlammable`
+  scanned the outer box, whose y-courses reach the grass apron; grass
+  burns at ≈1 cell/tick, so the neighbor guard tripped in ~10 ticks —
+  unwinnable by construction (and the unattended blaze then burned the
+  town block, which is why demolition found no ready candidate).
+  Setup (and readiness) now scan the building **body** (footprint,
+  floor up).
+- **Neighbor fire guards watch structures, not boxes.** The fire and
+  demolition guards count `fireIgnited` inside neighbor **bodies**; the
+  old boxes reach lawn level and a scorched-lawn crossing tripped them
+  in under a second. Explosions still guard on full boxes.
+
+### Added
+
+- `__mw.scenario.target()` — the staged site (fire/rescue prefer
+  houses, so it is not necessarily `buildings[0]`).
+- 4 unit tests (448 total): rotation contract, positional target
+  selection, body-only ignition, lawn-tolerant neighbor guard.
+- Phase 18 harness section (8 checks, two pages) — written, first run
+  deferred per the VM-load policy.
+
+### Verified
+
+- All five scenarios end to end in the live page (seed 24680, zero page
+  errors): rescue (boards dug → figure walks free), flood (burst → pump
+  removal), fire (winnable with a 4 s human-ish reaction delay),
+  collapse (teleport clear → cascade → quiet window → witness safe),
+  demolition (raze by hand). 448 unit tests / 33 files green;
+  typecheck/lint/prettier/build clean.
+
 ## [0.16.0] — 2026-09-13 — Phase 18 (Scenario system)
 
 ### Added
